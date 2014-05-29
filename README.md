@@ -4,6 +4,10 @@
 ## Version:
 
 version:0.0.1
+
+## Futures
+support script cmd
+support input key
   
 ## Install:
 ```sh
