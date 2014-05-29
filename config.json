@@ -1,0 +1,11 @@
+{
+	"Configs":{
+		"ServerIP":[			
+			"10.7.9.83",
+			"10.7.9.90"
+		],
+		"ServerPort":"9000",
+		"User":"abc",
+		"Password":"abc123"
+	}
+}
