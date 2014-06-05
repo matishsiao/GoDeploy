@@ -8,6 +8,7 @@ import (
 	"strings"
 	"os"
 	"regexp"
+	"io/ioutil"
 )
 
 var version string = "0.0.1"
@@ -15,7 +16,7 @@ var configInfo ConfigInfo
 var help *bool
 var envConfig Configs
 var clientList map[string]*Client
-
+var cmdReg = regexp.MustCompile("^cmd+|^help+|^exit+|^file+|^script+")
 func main() {
 	configInfo.FileName = flag.String("config", "./config.json", "set config file path.")
 	configInfo.Debug = flag.Bool("debug", false, "show debug trace message.")
@@ -70,13 +71,22 @@ func main() {
 }
 
 func Input() {
-	var cmdReg = regexp.MustCompile("^cmd+|^help+|^exit+|^file+")
+	
 	for {
    		cmdReader := bufio.NewReader(os.Stdin)
 		cmdStr, _ := cmdReader.ReadString('\n')
-		cmdStr = strings.Trim(cmdStr, "\r\n")   		
-		if cmdStr != "" {	
-			switch cmdStr {
+		cmdStr = strings.Trim(cmdStr, "\r\n")   
+		cmd := ""
+		if cmdStr != ""{
+			if strings.Index(cmdStr," ") != -1 {
+				cmd = cmdStr[:strings.Index(cmdStr," ")]
+			} else {
+				cmd = cmdStr
+			} 
+		}
+		
+			
+			switch cmd {
 				case "help":
 					fmt.Printf("Input command:\n")
 					fmt.Printf("1.cmd: Send command to server\n")
@@ -90,6 +100,8 @@ func Input() {
 				case "exit":
 					fmt.Printf("GoDeploy good bye.\n")
 					os.Exit(0)
+				case "script":
+					go sendScript(cmdStr)
 				default:
 				if strings.Index(cmdStr," ") != -1 && cmdReg.MatchString(cmdStr) {
 					for _,v := range clientList {
@@ -98,8 +110,28 @@ func Input() {
 				} else {
 					fmt.Printf("Wrong command input.\n")
 				}
-			}			
-		}
+			}				
+	}	
+}
+
+func sendScript(cmdStr string) {
+	FileName := cmdStr[strings.Index(cmdStr," ")+1:]
+	fmt.Printf("send script file:%v\n",FileName)			
+	file, e := ioutil.ReadFile(FileName)
+	if e != nil {
+		fmt.Printf("Load script error: %v\n", e)
 	}
-	
+					
+	var script = strings.Split(string(file),"\n")
+	for k,v := range script {
+		fmt.Printf("[%d]:%v \n",k,v)
+		if strings.Index(v," ") != -1 && cmdReg.MatchString(v) {
+			for _,cv := range clientList {
+				cv.InputCmd(v)								
+			}							
+		} else {
+			fmt.Printf("Script Wrong command input.\n")
+		}
+		time.Sleep(1 * time.Second)						
+	}
 }
