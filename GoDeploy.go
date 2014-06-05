@@ -95,8 +95,9 @@ func Input() {
 					fmt.Printf("2.file: Send file to server\n")
 					fmt.Printf("example:\n")
 					fmt.Printf("   file test.txt\n")
-					fmt.Printf("3.help: Show help information.\n")
-					fmt.Printf("4.exit: Leave appclication.\n")
+					fmt.Printf("3.script: use script to run command.\n")
+					fmt.Printf("4.help: Show help information.\n")
+					fmt.Printf("5.exit: Leave appclication.\n")
 				case "exit":
 					fmt.Printf("GoDeploy good bye.\n")
 					os.Exit(0)
