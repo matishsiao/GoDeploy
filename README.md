@@ -1,9 +1,11 @@
 # Introduction:
-  This GoDeploy is simple deploy tool by Golang.
+  GoDeploy is simple deploy tool by Golang.
+  It can help you to quickly send command or file to your server groups.
+  one client wtih mutli server.
   
 ## Version:
 
-version:0.0.1
+version:0.0.2
 
 ## Futures
 
@@ -20,7 +22,7 @@ version:0.0.1
 ```sh
     {
 	  "Configs":{
-	  	"ServerIP":[	//Delpoy receive server ip list		
+	  	"ServerIP":[	//Deploy receive server ip list		
   			"10.7.9.83",
 			  "10.7.9.90"
 		  ],
