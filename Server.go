@@ -64,84 +64,83 @@ func (cl *SrvClient) Read() {
 
 func (cl *SrvClient) Process(data []byte) {
 	if !cl.File {
-		fmt.Printf("[%v][process]:%v \n",time.Now().Unix(),string(data))		
-		revMsg := strings.Split(string(data),`,`)
-		rev := make(map[string]string)
-		for _,v := range revMsg {
-			msg :=  strings.Split(v,`:`)
-			if len(msg) == 2 {			
-				rev[msg[0]] = msg[1]
+		if string(data) != "health" {
+			fmt.Printf("[%v][process]:%v \n",time.Now().Unix(),string(data))		
+			revMsg := strings.Split(string(data),`,`)
+			rev := make(map[string]string)
+			for _,v := range revMsg {
+				msg :=  strings.Split(v,`:`)
+				if len(msg) == 2 {			
+					rev[msg[0]] = msg[1]
+				}
 			}
-		}
-		if v,ok := rev["action"]; ok {
-			switch v {
-				case "login":					
-					 cl.User = rev["user"]
-					 cl.Token = rev["pwd"]					 
-					 if cl.CheckUser() {
-					 	cl.Login = true
-					 	cl.Write([]byte("action:login,status:success"))
-					 } else {
-					 	cl.Write([]byte("action:login,status:failed,msg:account not correct."))
-					 	cl.Conn.Close()
-					 }
-				case "cmd":
-					if cl.Login {
-						cmdLine := strings.Split(rev["cmd"]," ")
-						var cmd *exec.Cmd
-						if len(cmdLine) > 1{
-							arg := strings.Index(rev["cmd"]," ")+1	
-							cmdStr := rev["cmd"]	
-							args := strings.Split(cmdStr[arg:]," ")
-							cmd = exec.Command(cmdLine[0],args...)
-						} else {
-							cmd = exec.Command(cmdLine[0])
-						}
-						cmd.Stdin = strings.NewReader("some input")
-						var out bytes.Buffer
-						var stderr bytes.Buffer
-						cmd.Stdout = &out
-						cmd.Stderr = &stderr
-						err := cmd.Run()
-						if err != nil {							
-							msg := fmt.Sprintf("action:Server,ip:%v,msg:[Error]%v",serverIP,fmt.Sprint(err) + "-" + stderr.String())
-							cl.Write([]byte(msg))
-							return
-						}
-						//fmt.Printf("Server in all caps: %v\n", out.String())
-						outStr := out.String()
-						if outStr == "" {
-							outStr = "done."
-						}
-						msg := fmt.Sprintf("action:Server,ip:%v,msg:[Cmd]\n%v",serverIP,outStr)
-						cl.Write([]byte(msg))
-					}
-				case "file":
-					if cl.Login {	
-						if rev["cmd"] == "start" {					
-							fileSize, err := strconv.ParseInt(rev["size"],10,64)
-							if err != nil {
-								fmt.Printf("conv error:%v\n",err)
-							}
-							if fileSize != 0 {
-								cl.File = true
-								cl.FileObj = &FileObject{FileName:rev["file"],FileSize:fileSize}
+			if v,ok := rev["action"]; ok {
+				switch v {
+					case "login":					
+						 cl.User = rev["user"]
+						 cl.Token = rev["pwd"]					 
+						 if cl.CheckUser() {
+						 	cl.Login = true
+						 	cl.Write([]byte("action:login,status:success"))
+						 } else {
+						 	cl.Write([]byte("action:login,status:failed,msg:account not correct."))
+						 	cl.Conn.Close()
+						 }
+					case "cmd":
+						if cl.Login {
+							cmdLine := strings.Split(rev["cmd"]," ")
+							var cmd *exec.Cmd
+							if len(cmdLine) > 1{
+								arg := strings.Index(rev["cmd"]," ")+1	
+								cmdStr := rev["cmd"]	
+								args := strings.Split(cmdStr[arg:]," ")
+								cmd = exec.Command(cmdLine[0],args...)
 							} else {
-								msg := fmt.Sprintf("action:Server,ip:%v,msg:[Error]\n%v",serverIP,"File size not be zero.\n")
+								cmd = exec.Command(cmdLine[0])
+							}
+							cmd.Stdin = strings.NewReader("some input")
+							var out bytes.Buffer
+							var stderr bytes.Buffer
+							cmd.Stdout = &out
+							cmd.Stderr = &stderr
+							err := cmd.Run()
+							if err != nil {							
+								msg := fmt.Sprintf("action:Server,ip:%v,msg:[Error]%v",serverIP,fmt.Sprint(err) + "-" + stderr.String())
 								cl.Write([]byte(msg))
-							}					
+								return
+							}
+							//fmt.Printf("Server in all caps: %v\n", out.String())
+							outStr := out.String()
+							if outStr == "" {
+								outStr = "done."
+							}
+							msg := fmt.Sprintf("action:Server,ip:%v,msg:[Cmd]\n%v",serverIP,outStr)
+							cl.Write([]byte(msg))
 						}
-					}
-				case "input":
-					if cl.Login {	
-						os.Stdout.Write([]byte(rev["cmd"]+"\n"))
-						fmt.Printf("input all caps\n")
-					}				
+					case "file":
+						if cl.Login {	
+							if rev["cmd"] == "start" {					
+								fileSize, err := strconv.ParseInt(rev["size"],10,64)
+								if err != nil {
+									fmt.Printf("conv error:%v\n",err)
+								}
+								if fileSize != 0 {
+									cl.File = true
+									cl.FileObj = &FileObject{FileName:rev["file"],FileSize:fileSize}
+								} else {
+									msg := fmt.Sprintf("action:Server,ip:%v,msg:[Error]\n%v",serverIP,"File size not be zero.\n")
+									cl.Write([]byte(msg))
+								}					
+							}
+						}
+					case "input":
+						if cl.Login {	
+							os.Stdout.Write([]byte(rev["cmd"]+"\n"))
+							fmt.Printf("input all caps\n")
+						}				
+				}
 			}
-			//fmt.Printf("Server rev:%v\n",rev)
 		}
-		
-		
 	} else {
 		cl.FileObj.Data = append(cl.FileObj.Data,data...)		
 		if int64(len(cl.FileObj.Data)) == cl.FileObj.FileSize {

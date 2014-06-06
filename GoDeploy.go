@@ -62,12 +62,13 @@ func main() {
 			}
 			time.Sleep(1500 * time.Millisecond)
 			go Input()
-			//fmt.Println("GoDeploy:>")
+			cmdEndPos()	
 		default:
 			fmt.Printf("No sure mode,Please use -help to see more information.\n")
 			os.Exit(0)
 	}
 	go receiveChan()
+	go checkServerHealth()
 	
 	for {
 		configWatcher()
@@ -106,6 +107,17 @@ func getServerProcessedCount() int {
 	return count
 }
 
+func checkServerHealth() {
+	for {
+		for _,v := range clientList {
+			if v != nil {
+				v.Write([]byte("health"))
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
 
 func Input() {
 	
@@ -121,16 +133,10 @@ func Input() {
 				cmd = cmdStr
 			} 
 		}
-		for k,v := range clientList {
-			if v != nil && v.Close {
-				
-				fmt.Printf("[%s]:is closed.\n",v.Server)
-				delete(clientList,k)			
-			}
-		}
-			
+					
 		switch cmd {
 				case "help":
+					fmt.Printf("[Deploy help]\n")
 					fmt.Printf("Input command list:\n")
 					fmt.Printf("1.cmd: Send command to server\n")
 					fmt.Printf("       example:cmd ls\n")					
@@ -138,20 +144,40 @@ func Input() {
 					fmt.Printf("       example:file test.txt\n")					
 					fmt.Printf("3.script: Use script to run commands.\n")
 					fmt.Printf("       example:script test.dsh\n")				
-					fmt.Printf("4.list: Show all connected server list.\n")
+					fmt.Printf("4.status: Show all server status.\n")
 					fmt.Printf("5.help: Show help information.\n")
 					fmt.Printf("6.exit: Exit appclication.\n")
 					cmdEndPos()	
+				case "reconnect":
+					go reconnect()
 				case "exit":
-					fmt.Printf("GoDeploy good bye.\n")
+					fmt.Printf("Good bye.Have nice day.\n")
 					os.Exit(0)
-				case "list":
+				case "status":
+					fmt.Printf("[Server status]\n")
 					for _,v := range clientList {
 						if v != nil {
 							fmt.Printf("[%s][Connection]:%v\n",v.Server,v.Connected)
 						}
 					}
 					cmdEndPos()	
+				case "file":				
+					FileName := cmdStr[strings.Index(cmdStr," ")+1:]
+					//fmt.Printf("send file:%v\n",FileName)			
+					file, e := ioutil.ReadFile(FileName)
+					if e != nil {
+						fmt.Printf("Load file error: %v\n", e)
+					}
+					if file != nil && len(file) > 0 {
+						for _,v := range clientList {
+							if v != nil && v.Connected {
+								v.SendFile(FileName,file)
+							}
+						}
+					} else {
+						fmt.Println("file error: file is nil or file size is zero")
+						cmdEndPos()				
+					}
 				case "script":
 					go sendScript(cmdStr)
 				default:
@@ -159,6 +185,8 @@ func Input() {
 					for _,v := range clientList {
 						if v != nil && v.Connected {
 							v.InputCmd(cmdStr)
+						}else{
+							fmt.Printf("v is nil:%v\n",v.Server)
 						}
 					}
 				} else {
@@ -172,6 +200,16 @@ func Input() {
 
 func cmdEndPos(){
 	fmt.Printf("GoDeploy:>")	
+}
+
+func reconnect() {
+	for _,v := range clientList {
+		if v != nil && !v.Connected {
+			go v.Connect(v.Server+":"+envConfig.Configs.ServerPort)	
+		}
+	}
+	time.Sleep(1000 * time.Millisecond)
+	cmdEndPos()	
 }
 
 func sendScript(cmdStr string) {
