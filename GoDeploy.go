@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"strings"
 	"os"
+	_ "os/signal"
 	"regexp"
 	"io/ioutil"
 )
@@ -81,7 +82,7 @@ func receiveChan() {
 	for {
 		rev := <-clientChan
 		//fmt.Println(rev)	
-		if len(rev) > 0 && getConnectionListCount() == getServerProcessedCount() {
+		if len(rev) > 0 && getConnectionListCount() == getServerProcessedCount() && getConnectionListCount() > 0{
 			cmdEndPos()	
 		}
 	}
@@ -120,13 +121,13 @@ func checkServerHealth() {
 
 
 func Input() {
-	
 	for {
    		cmdReader := bufio.NewReader(os.Stdin)
+   		
 		cmdStr, _ := cmdReader.ReadString('\n')
 		cmdStr = strings.Trim(cmdStr, "\r\n")   
 		cmd := ""
-		if cmdStr != ""{
+		if cmdStr != ""{			
 			if strings.Index(cmdStr," ") != -1 {
 				cmd = cmdStr[:strings.Index(cmdStr," ")]
 			} else {
@@ -171,7 +172,7 @@ func Input() {
 					if file != nil && len(file) > 0 {
 						for _,v := range clientList {
 							if v != nil && v.Connected {
-								v.SendFile(FileName,file)
+								go v.SendFile(FileName,file)
 							}
 						}
 					} else {
@@ -185,8 +186,6 @@ func Input() {
 					for _,v := range clientList {
 						if v != nil && v.Connected {
 							v.InputCmd(cmdStr)
-						}else{
-							fmt.Printf("v is nil:%v\n",v.Server)
 						}
 					}
 				} else {

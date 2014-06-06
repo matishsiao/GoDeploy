@@ -33,9 +33,7 @@ func (cl *Client) Write(data []byte) {
 			cl.checkConneciton(true, false)
 			cl.ClientChan <- "write failed"
 		}
-	} else {
-		cl.Printf("Client Connection is nil.")
-	}
+	} 
 }
 
 func (cl *Client) Read() {
@@ -84,9 +82,7 @@ func (cl *Client) InputCmd(cmdStr string) {
 		cmd := cmdStr[:strings.Index(cmdStr," ")]
 		msg := fmt.Sprintf("action:%s,user:%s,cmd:%s",cmd,cl.User,cmdStr[strings.Index(cmdStr," ")+1:])
 		cl.Write([]byte(msg))
-	} else {
-		cl.Printf("Client Connection is nil.")
-	}
+	} 
 }
 
 func (cl *Client) SendFile(fileName string,data []byte) {	
@@ -95,9 +91,7 @@ func (cl *Client) SendFile(fileName string,data []byte) {
 		cl.Write([]byte(msg))
 		time.Sleep(1000 * time.Millisecond)
 		cl.Write(data)
-	} else {
-		cl.Printf("Client Connection is nil.")
-	}
+	} 
 }
 
 func (cl *Client) Printf(str string){

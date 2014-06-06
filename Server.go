@@ -125,6 +125,7 @@ func (cl *SrvClient) Process(data []byte) {
 									fmt.Printf("conv error:%v\n",err)
 								}
 								if fileSize != 0 {
+									fmt.Printf("start save file:%v\n",rev["file"])
 									cl.File = true
 									cl.FileObj = &FileObject{FileName:rev["file"],FileSize:fileSize}
 								} else {
@@ -141,12 +142,20 @@ func (cl *SrvClient) Process(data []byte) {
 				}
 			}
 		}
-	} else {
+	} else if string(data) != "health" {
 		cl.FileObj.Data = append(cl.FileObj.Data,data...)		
-		if int64(len(cl.FileObj.Data)) == cl.FileObj.FileSize {
+		if int64(len(cl.FileObj.Data)) >= cl.FileObj.FileSize {
 			fileName := cl.FileObj.FileName
+			fmt.Printf("Server write file:%v\n",fileName)
 			fo, err := os.Create(fileName)
-	    	if err != nil { panic(err) }
+	    	if err != nil {
+	    	    fmt.Printf("fo Error:%v\n",err)
+	    	 	cl.File = false
+				fmt.Printf("Server write file done:%v\n",fileName)
+				msg := fmt.Sprintf("action:Server,ip:%v,msg:[Cmd]%v",serverIP,fmt.Sprintf("Server write file %v",fileName))
+				cl.Write([]byte(msg))
+				cl.FileObj = nil 
+	    	}
 		    // close fo on exit and check for its returned error
 		    defer func() {
 		        if err := fo.Close(); err != nil {
