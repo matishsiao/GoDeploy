@@ -35,7 +35,26 @@ version:0.0.2
   }
 ```
 
+## Run:
+
+   Client mode
+```sh
+   ./GoDeploy -mode client
+```
+
+   Server mode
+```sh
+   ./GoDeploy
+```
+
+   Get more informatiion
+   
+```sh
+   ./GoDeploy -help 
+```
+
 ## Example:
+
 ```sh   
    cmd ls
    cmd whoami
