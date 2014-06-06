@@ -41,7 +41,40 @@ version:0.0.2
    cmd whoami
    file test.txt
    script add.dsh
+   help
+   status
+   reconnect
 ```
+
+## Commands:
+
+   1.cmd: Send command to server.
+    
+   example:
+    
+        cmd ls
+        
+        cmd df -h
+        
+   2.file: Send file to server.
+    
+   example:
+        
+        file test.txt
+        
+        file /var/tmp/test.txt //this file will save to server same directory.
+    
+   3.script: Use script to run commands.
+    
+   example:
+    
+        script test.dsh
+    
+   4.status: Show all server status.
+    
+   5.help: Show help information.
+    
+   6.exit: Exit appclication.
 
 ##License and Copyright
 This software is Copyright 2012-2014 Matis Hsiao.
