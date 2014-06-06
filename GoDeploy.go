@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"strings"
 	"os"
+	"syscall"
 	_ "os/signal"
 	"regexp"
 	"io/ioutil"
@@ -47,6 +48,7 @@ func main() {
 	if !ok {
 		os.Exit(0)
 	}
+	setUlimit(10000)
 	clientChan = make(chan string)
 	envConfig = config
 	switch *configInfo.Mode {
@@ -195,6 +197,26 @@ func Input() {
 		}		
 			
 	}	
+}
+
+func setUlimit(number uint64) {
+	var rLimit syscall.Rlimit
+    err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
+    if err != nil {
+        fmt.Println("Error Getting Rlimit ", err)
+    }
+    fmt.Println(rLimit)
+    rLimit.Max = number
+    rLimit.Cur = number
+    err = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rLimit)
+    if err != nil {
+        fmt.Println("Error Setting Rlimit ", err)
+    }
+    err = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
+    if err != nil {
+        fmt.Println("Error Getting Rlimit ", err)
+    }
+    fmt.Println("Rlimit Final", rLimit)
 }
 
 func cmdEndPos(){
