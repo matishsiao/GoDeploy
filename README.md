@@ -3,7 +3,7 @@
   
   It can help you to quickly send command or file to your server groups.
   
-  one client wtih mutli server.
+  one client with mutli servers.
   
 ## Version:
 
