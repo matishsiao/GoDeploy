@@ -11,9 +11,13 @@ import(
 type Client struct {
 	Server string
 	Conn *net.TCPConn
+	Close bool
+	Connected bool
 	User string
 	Pwd string
 	Login bool
+	ClientChan chan string
+	Processing bool
 }
 
 func (cl *Client) Init(conn *net.TCPConn) {
@@ -55,20 +59,24 @@ func (cl *Client) Process(data []byte) {
 				 if rev["status"] == "success" {
 				 	cl.Login = true				 	
 				 } else {
-					cl.Conn.Close()			 
+					cl.Conn.Close()		
+					cl.checkConneciton(true, false) 
 				 }
 			case "server":
 			
 		}
 		
 	}
+	cl.ClientChan <- string(data)
+	cl.Processing = false
 	//cl.Printf(fmt.Sprintf("client rev:%v\n",rev))
 }
 
 func (cl *Client) InputCmd(cmdStr string) {
 	//cl.Printf(fmt.Sprintf("Input Rev:%v\n",cmdStr))	
-	if cmdStr != "" {			
+	if cmdStr != "" && cl.Connected {			
 		cmd := cmdStr[:strings.Index(cmdStr," ")]
+		cl.Processing = true
 		switch cmd {
 			case "file":				
 				FileName := cmdStr[strings.Index(cmdStr," ")+1:]
@@ -86,6 +94,8 @@ func (cl *Client) InputCmd(cmdStr string) {
 				msg := fmt.Sprintf("action:%s,user:%s,cmd:%s",cmd,cl.User,cmdStr[strings.Index(cmdStr," ")+1:])
 				cl.Write([]byte(msg))
 		}
+	} else {
+		cl.Printf("Client Connection is nil.")
 	}
 }
 
@@ -93,17 +103,25 @@ func (cl *Client) Printf(str string){
 	fmt.Printf("Client[%v]:%v\n",cl.Server,str)	
 }
 
+func (cl *Client) checkConneciton(_close bool,_connected bool) {
+	cl.Close = _close
+	cl.Connected = _connected
+}
+
 func (cl *Client) Connect(addr string) {
 	serverAddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
-		cl.Printf(fmt.Sprintf("Connect serverAddr Error:%v\n",err))	
+		cl.Printf(fmt.Sprintf("Connect serverAddr Error:%v",err))
+		cl.checkConneciton(true, false)
 		return
 	}	
 	con, err := net.DialTCP("tcp", nil, serverAddr)
 	if err != nil {		
-		cl.Printf(fmt.Sprintf("Connect Error:%v\n",err))	
+		cl.Printf(fmt.Sprintf("Connect Error:%v",err))
+		cl.checkConneciton(true, false)	
 		return
 	}
+	cl.checkConneciton(false, true)
 	cl.Init(con)
 	msg := fmt.Sprintf("action:login,user:%s,pwd:%s",cl.User,cl.Pwd)
 	cl.Write([]byte(msg))

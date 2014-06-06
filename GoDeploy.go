@@ -16,6 +16,7 @@ var configInfo ConfigInfo
 var help *bool
 var envConfig Configs
 var clientList map[string]*Client
+var clientChan chan string
 var cmdReg = regexp.MustCompile("^cmd+|^help+|^exit+|^file+|^script+")
 func main() {
 	configInfo.FileName = flag.String("config", "./config.json", "set config file path.")
@@ -45,30 +46,66 @@ func main() {
 	if !ok {
 		os.Exit(0)
 	}
+	clientChan = make(chan string)
 	envConfig = config
 	switch *configInfo.Mode {
 		case "server": 
 			go Listen(":"+envConfig.Configs.ServerPort)
 		case "client":
 			clientList = make(map[string]*Client)
+			fmt.Printf(`You can keyin "help" to see more information.`+"\n")
+			fmt.Println("GoDeploy:> Start connect to servers.")
 			for _,v := range envConfig.Configs.ServerIP {
-				cl := &Client{Server:v,User:envConfig.Configs.User,Pwd:envConfig.Configs.Password}
+				cl := &Client{Server:v,User:envConfig.Configs.User,Pwd:envConfig.Configs.Password,ClientChan:clientChan}
 				clientList[v] = cl
 				go cl.Connect(v+":"+envConfig.Configs.ServerPort)			
 			}
+			time.Sleep(1500 * time.Millisecond)
 			go Input()
-			fmt.Printf(`You can keyin "help" to see more information.`+"\n")
+			//fmt.Println("GoDeploy:>")
 		default:
 			fmt.Printf("No sure mode,Please use -help to see more information.\n")
 			os.Exit(0)
 	}
-	
+	go receiveChan()
 	
 	for {
 		configWatcher()
 		time.Sleep(500 * time.Millisecond)
 	}	
 }
+
+
+func receiveChan() {
+	for {
+		rev := <-clientChan
+		//fmt.Println(rev)	
+		if len(rev) > 0 && getConnectionListCount() == getServerProcessedCount() {
+			cmdEndPos()	
+		}
+	}
+}
+
+func getConnectionListCount() int {
+	var count int = 0
+	for _,v := range clientList {
+		if v != nil && v.Connected {
+			count++
+		}
+	}
+	return count
+}
+
+func getServerProcessedCount() int {
+	var count int = 0
+	for _,v := range clientList {
+		if v != nil && v.Connected && !v.Processing {
+			count++
+		}
+	}
+	return count
+}
+
 
 func Input() {
 	
@@ -84,40 +121,62 @@ func Input() {
 				cmd = cmdStr
 			} 
 		}
-		
+		for k,v := range clientList {
+			if v != nil && v.Close {
+				
+				fmt.Printf("[%s]:is closed.\n",v.Server)
+				delete(clientList,k)			
+			}
+		}
 			
-			switch cmd {
+		switch cmd {
 				case "help":
-					fmt.Printf("Input command:\n")
+					fmt.Printf("Input command list:\n")
 					fmt.Printf("1.cmd: Send command to server\n")
-					fmt.Printf("example:\n")
-					fmt.Printf("   cmd ls\n")
+					fmt.Printf("       example:cmd ls\n")					
 					fmt.Printf("2.file: Send file to server\n")
-					fmt.Printf("example:\n")
-					fmt.Printf("   file test.txt\n")
-					fmt.Printf("3.script: use script to run command.\n")
-					fmt.Printf("4.help: Show help information.\n")
-					fmt.Printf("5.exit: Leave appclication.\n")
+					fmt.Printf("       example:file test.txt\n")					
+					fmt.Printf("3.script: Use script to run commands.\n")
+					fmt.Printf("       example:script test.dsh\n")				
+					fmt.Printf("4.list: Show all connected server list.\n")
+					fmt.Printf("5.help: Show help information.\n")
+					fmt.Printf("6.exit: Exit appclication.\n")
+					cmdEndPos()	
 				case "exit":
 					fmt.Printf("GoDeploy good bye.\n")
 					os.Exit(0)
+				case "list":
+					for _,v := range clientList {
+						if v != nil {
+							fmt.Printf("[%s][Connection]:%v\n",v.Server,v.Connected)
+						}
+					}
+					cmdEndPos()	
 				case "script":
 					go sendScript(cmdStr)
 				default:
 				if strings.Index(cmdStr," ") != -1 && cmdReg.MatchString(cmdStr) {
 					for _,v := range clientList {
-						v.InputCmd(cmdStr)
+						if v != nil && v.Connected {
+							v.InputCmd(cmdStr)
+						}
 					}
 				} else {
-					fmt.Printf("Wrong command input.\n")
-				}
-			}				
+					fmt.Printf("Wrong command input. You can use help to see more.\n")		
+					cmdEndPos()				
+				}				
+		}		
+			
 	}	
+}
+
+func cmdEndPos(){
+	fmt.Printf("GoDeploy:>")	
 }
 
 func sendScript(cmdStr string) {
 	FileName := cmdStr[strings.Index(cmdStr," ")+1:]
-	fmt.Printf("send script file:%v\n",FileName)			
+	fmt.Printf("load script file:%v\n",FileName)			
 	file, e := ioutil.ReadFile(FileName)
 	if e != nil {
 		fmt.Printf("Load script error: %v\n", e)
@@ -128,7 +187,9 @@ func sendScript(cmdStr string) {
 		fmt.Printf("[%d]:%v \n",k,v)
 		if strings.Index(v," ") != -1 && cmdReg.MatchString(v) {
 			for _,cv := range clientList {
-				cv.InputCmd(v)								
+				if cv != nil && cv.Connected {
+					cv.InputCmd(v)				
+				}				
 			}							
 		} else {
 			fmt.Printf("Script Wrong command input.\n")
