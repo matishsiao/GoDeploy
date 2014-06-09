@@ -25,6 +25,7 @@ func main() {
 	configInfo.Debug = flag.Bool("debug", false, "show debug trace message.")
 	configInfo.Version = flag.Bool("version", false, "GoDeploy version.")
 	configInfo.Mode = flag.String("mode", "server", "service mode:server,client default:server")
+	configInfo.Load = flag.String("load", "", "load script to run.")
 	help = flag.Bool("help", false, "Show help information.")
 	flag.Parse()
 	
@@ -64,8 +65,12 @@ func main() {
 				go cl.Connect(v+":"+envConfig.Configs.ServerPort)			
 			}
 			time.Sleep(1500 * time.Millisecond)
-			go Input()
-			cmdEndPos()	
+			if *configInfo.Load != "" {
+				sendScript(*configInfo.Load, true)
+			} else {
+				go Input()
+				cmdEndPos()	
+			}
 		default:
 			fmt.Printf("No sure mode,Please use -help to see more information.\n")
 			os.Exit(0)
@@ -79,12 +84,10 @@ func main() {
 	}	
 }
 
-
 func receiveChan() {
 	for {
-		rev := <-clientChan
-		//fmt.Println(rev)	
-		if len(rev) > 0 && getConnectionListCount() == getServerProcessedCount() && getConnectionListCount() > 0{
+		rev := <-clientChan		
+		if len(rev) > 0 && getConnectionListCount() == getServerProcessedCount() && getConnectionListCount() > 0{			
 			cmdEndPos()	
 		}
 	}
@@ -128,74 +131,83 @@ func Input() {
    		
 		cmdStr, _ := cmdReader.ReadString('\n')
 		cmdStr = strings.Trim(cmdStr, "\r\n")   
-		cmd := ""
-		if cmdStr != ""{			
-			if strings.Index(cmdStr," ") != -1 {
-				cmd = cmdStr[:strings.Index(cmdStr," ")]
-			} else {
-				cmd = cmdStr
-			} 
-		}
-					
-		switch cmd {
-				case "help":
-					fmt.Printf("[Deploy help]\n")
-					fmt.Printf("Input command list:\n")
-					fmt.Printf("1.cmd: Send command to server\n")
-					fmt.Printf("       example:cmd ls\n")					
-					fmt.Printf("2.file: Send file to server\n")
-					fmt.Printf("       example:file test.txt\n")					
-					fmt.Printf("3.script: Use script to run commands.\n")
-					fmt.Printf("       example:script test.dsh\n")				
-					fmt.Printf("4.status: Show all server status.\n")
-					fmt.Printf("5.help: Show help information.\n")
-					fmt.Printf("6.exit: Exit appclication.\n")
-					cmdEndPos()	
-				case "reconnect":
-					go reconnect()
-				case "exit":
-					fmt.Printf("Good bye.Have nice day.\n")
-					os.Exit(0)
-				case "status":
-					fmt.Printf("[Server status]\n")
-					for _,v := range clientList {
-						if v != nil {
-							fmt.Printf("[%s][Connection]:%v\n",v.Server,v.Connected)
-						}
+		sendCmd(cmdStr)
+	}	
+}
+
+func sendCmd(cmdStr string) {
+	cmd := ""
+	if cmdStr != "" {			
+		if strings.Index(cmdStr," ") != -1 {
+			cmd = cmdStr[:strings.Index(cmdStr," ")]
+		} else {
+			cmd = cmdStr
+		} 
+	} else {
+		return 
+	}
+	switch cmd {
+			case "help":
+				fmt.Printf("[Deploy help]\n")
+				fmt.Printf("Input command list:\n")
+				fmt.Printf("1.cmd: Send command to server\n")
+				fmt.Printf("       example:cmd ls\n")					
+				fmt.Printf("2.file: Send file to server\n")
+				fmt.Printf("       example:file test.txt\n")					
+				fmt.Printf("3.script: Use script to run commands.\n")
+				fmt.Printf("       example:script test.dsh\n")				
+				fmt.Printf("4.status: Show all server status.\n")
+				fmt.Printf("5.help: Show help information.\n")
+				fmt.Printf("6.exit: Exit appclication.\n")
+				cmdEndPos()	
+			case "reconnect":
+				go reconnect()
+			case "exit":
+				fmt.Printf("Good bye.Have nice day.\n")
+				os.Exit(0)
+			case "status":
+				fmt.Printf("[Server status]\n")
+				for _,v := range clientList {
+					if v != nil {
+						fmt.Printf("[%s][Connection]:%v\n",v.Server,v.Connected)
 					}
-					cmdEndPos()	
-				case "file":				
-					FileName := cmdStr[strings.Index(cmdStr," ")+1:]
-					//fmt.Printf("send file:%v\n",FileName)			
-					file, e := ioutil.ReadFile(FileName)
-					if e != nil {
-						fmt.Printf("Load file error: %v\n", e)
-					}
-					if file != nil && len(file) > 0 {
-						for _,v := range clientList {
-							if v != nil && v.Connected {
-								go v.SendFile(FileName,file)
-							}
-						}
-					} else {
-						fmt.Println("file error: file is nil or file size is zero")
-						cmdEndPos()				
-					}
-				case "script":
-					go sendScript(cmdStr)
-				default:
-				if strings.Index(cmdStr," ") != -1 && cmdReg.MatchString(cmdStr) {
+				}
+				cmdEndPos()	
+			case "file":				
+				FileName := cmdStr[strings.Index(cmdStr," ")+1:]							
+				file, e := ioutil.ReadFile(FileName)
+				if e != nil {
+					fmt.Printf("Load file error: %v\n", e)
+				}
+				if file != nil && len(file) > 0 {
 					for _,v := range clientList {
 						if v != nil && v.Connected {
-							v.InputCmd(cmdStr)
+							go v.SendFile(FileName,file)
 						}
 					}
 				} else {
-					fmt.Printf("Wrong command input. You can use help to see more.\n")		
+					fmt.Println("file error: file is nil or file size is zero")
 					cmdEndPos()				
-				}				
-		}		
-			
+				}
+			case "env":
+				for _,v := range clientList {
+					if v != nil && v.Connected {
+						v.InputCmd(cmd)
+					}
+				}
+			case "script":
+				sendScript(cmdStr, false)
+			default:
+			if strings.Index(cmdStr," ") != -1 && cmdReg.MatchString(cmdStr) {
+				for _,v := range clientList {
+					if v != nil && v.Connected {
+						v.InputCmd(cmdStr)
+					}
+				}
+			} else {
+				fmt.Printf("Wrong command input. You can use help to see more.\n")		
+				cmdEndPos()				
+			}				
 	}	
 }
 
@@ -233,7 +245,7 @@ func reconnect() {
 	cmdEndPos()	
 }
 
-func sendScript(cmdStr string) {
+func sendScript(cmdStr string, load bool) {
 	FileName := cmdStr[strings.Index(cmdStr," ")+1:]
 	fmt.Printf("load script file:%v\n",FileName)			
 	file, e := ioutil.ReadFile(FileName)
@@ -245,14 +257,13 @@ func sendScript(cmdStr string) {
 	for k,v := range script {
 		fmt.Printf("[%d]:%v \n",k,v)
 		if strings.Index(v," ") != -1 && cmdReg.MatchString(v) {
-			for _,cv := range clientList {
-				if cv != nil && cv.Connected {
-					cv.InputCmd(v)				
-				}				
-			}							
+			sendCmd(v)						
 		} else {
 			fmt.Printf("Script Wrong command input.\n")
 		}
 		time.Sleep(1 * time.Second)						
+	}
+	if load {
+		sendCmd("exit")
 	}
 }

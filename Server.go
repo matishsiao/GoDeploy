@@ -11,7 +11,7 @@ import(
 	"strconv"
 	"time"
 	"regexp"
-	
+	"github.com/matishsiao/goInfo"
 )
 
 type SrvClient struct {
@@ -29,11 +29,13 @@ var srvClientList map[string]*SrvClient
 var clientOutgoing chan []byte
 var clientIncoming chan []byte
 var serverIP string
+var ServerInfo *goInfo.GoInfoObject
 
 func (cl *SrvClient) Init(conn *net.TCPConn,ch chan []byte,inch chan []byte) {
 	cl.Conn = conn
 	cl.Outgoing = ch
 	cl.Incoming = inch
+	ServerInfo = goInfo.GetInfo()
 	cl.Read()
 	go cl.Receiver()
 }
@@ -87,35 +89,19 @@ func (cl *SrvClient) Process(data []byte) {
 						 	cl.Conn.Close()
 						 }
 					case "cmd":
-						if cl.Login {
-							cmdLine := strings.Split(rev["cmd"]," ")
-							var cmd *exec.Cmd
-							if len(cmdLine) > 1{
-								arg := strings.Index(rev["cmd"]," ")+1	
-								cmdStr := rev["cmd"]	
-								args := strings.Split(cmdStr[arg:]," ")
-								cmd = exec.Command(cmdLine[0],args...)
-							} else {
-								cmd = exec.Command(cmdLine[0])
-							}
-							cmd.Stdin = strings.NewReader("some input")
-							var out bytes.Buffer
-							var stderr bytes.Buffer
-							cmd.Stdout = &out
-							cmd.Stderr = &stderr
-							err := cmd.Run()
-							if err != nil {							
-								msg := fmt.Sprintf("action:Server,ip:%v,msg:[Error]%v",serverIP,fmt.Sprint(err) + "-" + stderr.String())
-								cl.Write([]byte(msg))
-								return
-							}
+						if cl.Login {							
 							//fmt.Printf("Server in all caps: %v\n", out.String())
-							outStr := out.String()
+							outStr := cl.runCmd(rev)
+							
+							for strings.Index(outStr ,"broken pipe") != -1 {
+								outStr = cl.runCmd(rev)
+								time.Sleep(250 * time.Millisecond)
+							}						
 							if outStr == "" {
-								outStr = "done."
-							}
+								outStr = "success"
+							} 
 							msg := fmt.Sprintf("action:Server,ip:%v,msg:[Cmd]\n%v",serverIP,outStr)
-							cl.Write([]byte(msg))
+							cl.Write([]byte(msg))							
 						}
 					case "file":
 						if cl.Login {	
@@ -127,17 +113,24 @@ func (cl *SrvClient) Process(data []byte) {
 								if fileSize != 0 {
 									fmt.Printf("start save file:%v\n",rev["file"])
 									cl.File = true
-									cl.FileObj = &FileObject{FileName:rev["file"],FileSize:fileSize}
+									fileName := ""
+									if ServerInfo.OS != "windows" {
+										fileName = rev["file"][strings.LastIndex(rev["file"],"/"):]
+									} else {
+										fileName = rev["file"][strings.LastIndex(rev["file"],"\\"):]
+									}	
+									cl.FileObj = &FileObject{FileName:fileName,FileSize:fileSize}
 								} else {
 									msg := fmt.Sprintf("action:Server,ip:%v,msg:[Error]\n%v",serverIP,"File size not be zero.\n")
 									cl.Write([]byte(msg))
 								}					
 							}
 						}
-					case "input":
+					case "env":
 						if cl.Login {	
-							os.Stdout.Write([]byte(rev["cmd"]+"\n"))
-							fmt.Printf("input all caps\n")
+							gi := goInfo.GetInfo()
+							msg := fmt.Sprintf("action:Server,ip:%v,msg:[Env]\n%v",serverIP,gi.String())
+							cl.Write([]byte(msg))
 						}				
 				}
 			}
@@ -147,7 +140,12 @@ func (cl *SrvClient) Process(data []byte) {
 		if int64(len(cl.FileObj.Data)) >= cl.FileObj.FileSize {
 			fileName := cl.FileObj.FileName
 			fmt.Printf("Server write file:%v\n",fileName)
-			fo, err := os.Create(fileName)
+			os.Mkdir("file",0777)
+			dir := "file/"
+			if ServerInfo.OS == "windows" {
+				dir = "file\\"
+			}
+			fo, err := os.Create(dir + fileName)
 	    	if err != nil {
 	    	    fmt.Printf("fo Error:%v\n",err)
 	    	 	cl.File = false
@@ -174,6 +172,33 @@ func (cl *SrvClient) Process(data []byte) {
 			cl.FileObj = nil
 		}
 	}
+}
+
+
+func (cl *SrvClient) runCmd(rev map[string]string) string {
+	cmdLine := strings.Split(rev["cmd"]," ")
+	var cmd *exec.Cmd
+	if len(cmdLine) > 1{
+		arg := strings.Index(rev["cmd"]," ")+1	
+		cmdStr := rev["cmd"]	
+		args := strings.Split(cmdStr[arg:]," ")
+		cmd = exec.Command(cmdLine[0],args...)
+	} else {
+		cmd = exec.Command(cmdLine[0])
+	}
+	cmd.Stdin = strings.NewReader("some input")
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	msg := ""
+	if err != nil {
+		msg = fmt.Sprintf("action:Server,ip:%v,msg:[Error]%v",serverIP,fmt.Sprint(err) + "-" + stderr.String())		
+	} else {
+		msg = out.String()
+	} 
+	return msg
 }
 
 func (cl *SrvClient) CheckUser() bool {

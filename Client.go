@@ -67,20 +67,24 @@ func (cl *Client) Process(data []byte) {
 					cl.checkConneciton(true, false) 
 				 }
 			case "server":
-			
+			default:
 		}
 		
 	}
 	cl.ClientChan <- string(data)
 	cl.Processing = false
-	//cl.Printf(fmt.Sprintf("client rev:%v\n",rev))
 }
 
-func (cl *Client) InputCmd(cmdStr string) {
-	//cl.Printf(fmt.Sprintf("Input Rev:%v connection:%v\n",cmdStr, cl.Connected))	
-	if cmdStr != "" && cl.Connected {			
-		cmd := cmdStr[:strings.Index(cmdStr," ")]
-		msg := fmt.Sprintf("action:%s,user:%s,cmd:%s",cmd,cl.User,cmdStr[strings.Index(cmdStr," ")+1:])
+func (cl *Client) InputCmd(cmdStr string) {		
+	if cmdStr != "" && cl.Connected {		
+		var cmdInfo,cmd string
+		if strings.Index(cmdStr," ")+1 != 0 {
+			cmd = cmdStr[:strings.Index(cmdStr," ")]
+			cmdInfo = cmdStr[strings.Index(cmdStr," ")+1:]
+		} else {
+			cmd = cmdStr
+		}
+		msg := fmt.Sprintf("action:%s,user:%s,cmd:%s",cmd,cl.User,cmdInfo)
 		cl.Write([]byte(msg))
 	} 
 }

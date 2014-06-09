@@ -11,6 +11,7 @@ type ConfigInfo struct {
 	Debug    *bool
 	Version  *bool
 	Mode	*string	
+	Load	*string
 }
 
 type Configs struct {
