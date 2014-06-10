@@ -21,30 +21,16 @@ type SrvClient struct {
 	File bool
 	FileObj *FileObject
 	Login bool
-	Outgoing chan []byte
-	Incoming chan []byte
 }
 
 var srvClientList map[string]*SrvClient
-var clientOutgoing chan []byte
-var clientIncoming chan []byte
 var serverIP string
 var ServerInfo *goInfo.GoInfoObject
 
-func (cl *SrvClient) Init(conn *net.TCPConn,ch chan []byte,inch chan []byte) {
+func (cl *SrvClient) Init(conn *net.TCPConn) {
 	cl.Conn = conn
-	cl.Outgoing = ch
-	cl.Incoming = inch
 	ServerInfo = goInfo.GetInfo()
 	cl.Read()
-	go cl.Receiver()
-}
-
-func (cl *SrvClient) Receiver() {
-	for {
-		buf := <- cl.Incoming
-		cl.Write(buf)
-	}
 }
 
 func (cl *SrvClient) Write(data []byte) {
@@ -60,14 +46,13 @@ func (cl *SrvClient) Read() {
 	    }
 	    data := buf[:bytesRead]
 	    cl.Process(data)
-	    //cl.Outgoing <- data
     }
 }
 
 func (cl *SrvClient) Process(data []byte) {
 	if !cl.File {
 		if string(data) != "health" {
-			fmt.Printf("[%v][process]:%v \n",time.Now().Unix(),string(data))		
+			fmt.Printf("[%v][process]:%v\n",time.Now().Unix(),string(data))	
 			revMsg := strings.Split(string(data),`,`)
 			rev := make(map[string]string)
 			for _,v := range revMsg {
@@ -83,24 +68,23 @@ func (cl *SrvClient) Process(data []byte) {
 						 cl.Token = rev["pwd"]					 
 						 if cl.CheckUser() {
 						 	cl.Login = true
-						 	cl.Write([]byte("action:login,status:success"))
+						 	cl.Write([]byte("action=login&status=success&type=system&msg=login success&cmdIdx=-1"))
 						 } else {
-						 	cl.Write([]byte("action:login,status:failed,msg:account not correct."))
+						 	cl.Write([]byte("action=login&status=failed&type=system&msg=account not correct.&cmdIdx=-1"))
 						 	cl.Conn.Close()
 						 }
 					case "cmd":
-						if cl.Login {							
-							//fmt.Printf("Server in all caps: %v\n", out.String())
-							outStr := cl.runCmd(rev)
-							
+						if cl.Login {
+							outStr := cl.runCmd(rev)							
 							for strings.Index(outStr ,"broken pipe") != -1 {
 								outStr = cl.runCmd(rev)
 								time.Sleep(250 * time.Millisecond)
 							}						
 							if outStr == "" {
-								outStr = "success"
-							} 
-							msg := fmt.Sprintf("action:Server,ip:%v,msg:[Cmd]\n%v",serverIP,outStr)
+								outStr = rev["cmd"] +" success"
+							}
+							//fmt.Println("Server out string:",outStr)
+							msg := fmt.Sprintf("action=server&ip=%v&type=cmd&msg=%v&cmdIdx=%s",serverIP,outStr,rev["cmdIdx"])
 							cl.Write([]byte(msg))							
 						}
 					case "file":
@@ -113,15 +97,15 @@ func (cl *SrvClient) Process(data []byte) {
 								if fileSize != 0 {
 									fmt.Printf("start save file:%v\n",rev["file"])
 									cl.File = true
-									fileName := ""
-									if ServerInfo.OS != "windows" {
+									fileName := rev["file"]
+									if ServerInfo.OS != "windows" && strings.LastIndex(rev["file"],"/") != -1 {
 										fileName = rev["file"][strings.LastIndex(rev["file"],"/"):]
-									} else {
+									} else if strings.LastIndex(rev["file"],"\\") != -1 {
 										fileName = rev["file"][strings.LastIndex(rev["file"],"\\"):]
 									}	
-									cl.FileObj = &FileObject{FileName:fileName,FileSize:fileSize}
+									cl.FileObj = &FileObject{FileName:fileName,FileSize:fileSize,CmdIdx:rev["cmdIdx"]}
 								} else {
-									msg := fmt.Sprintf("action:Server,ip:%v,msg:[Error]\n%v",serverIP,"File size not be zero.\n")
+									msg := fmt.Sprintf("action=server&ip=%v&type=file&msg=%v&cmdIdx=%s",serverIP,"file size not be zero.\n",rev["cmdIdx"])
 									cl.Write([]byte(msg))
 								}					
 							}
@@ -129,7 +113,7 @@ func (cl *SrvClient) Process(data []byte) {
 					case "env":
 						if cl.Login {	
 							gi := goInfo.GetInfo()
-							msg := fmt.Sprintf("action:Server,ip:%v,msg:[Env]\n%v",serverIP,gi.String())
+							msg := fmt.Sprintf("action=server&ip=%v&type=env&msg=%v&cmdIdx=%s",serverIP,gi.String(),rev["cmdIdx"])
 							cl.Write([]byte(msg))
 						}				
 				}
@@ -139,7 +123,7 @@ func (cl *SrvClient) Process(data []byte) {
 		cl.FileObj.Data = append(cl.FileObj.Data,data...)		
 		if int64(len(cl.FileObj.Data)) >= cl.FileObj.FileSize {
 			fileName := cl.FileObj.FileName
-			fmt.Printf("Server write file:%v\n",fileName)
+			//fmt.Printf("Server write file:%v\n",fileName)
 			os.Mkdir("file",0777)
 			dir := "file/"
 			if ServerInfo.OS == "windows" {
@@ -147,27 +131,28 @@ func (cl *SrvClient) Process(data []byte) {
 			}
 			fo, err := os.Create(dir + fileName)
 	    	if err != nil {
-	    	    fmt.Printf("fo Error:%v\n",err)
+	    	    fmt.Printf("File create error:%v\n",err)
 	    	 	cl.File = false
 				fmt.Printf("Server write file done:%v\n",fileName)
-				msg := fmt.Sprintf("action:Server,ip:%v,msg:[Cmd]%v",serverIP,fmt.Sprintf("Server write file %v",fileName))
+				msg := fmt.Sprintf("action=server&ip=%v&type=file&msg=%v&cmdIdx=%s",serverIP,fmt.Sprintf("error,server write file %v failed",fileName),cl.FileObj.CmdIdx)
 				cl.Write([]byte(msg))
 				cl.FileObj = nil 
+				return
 	    	}
 		    // close fo on exit and check for its returned error
 		    defer func() {
 		        if err := fo.Close(); err != nil {
-		            fmt.Printf("fo Error:%v\n",err)
+		            fmt.Printf("File close error:%v\n",err)
 		        }
 		    }()
 
 	        if _, err := fo.Write(cl.FileObj.Data); err != nil {
-	           fmt.Printf("fo Write Error:%v\n",err)
+	           fmt.Printf("File Write Error:%v\n",err)
 	        }
 	    	
 			cl.File = false
-			fmt.Printf("Server write file done:%v\n",fileName)
-			msg := fmt.Sprintf("action:Server,ip:%v,msg:[Cmd]%v",serverIP,fmt.Sprintf("Server write file %v",fileName))
+			
+			msg := fmt.Sprintf("action=server&ip=%v&type=file&msg=%v&cmdIdx=%s",serverIP,fmt.Sprintf("Server write file %v success",fileName),cl.FileObj.CmdIdx)
 			cl.Write([]byte(msg))
 			cl.FileObj = nil
 		}
@@ -186,7 +171,7 @@ func (cl *SrvClient) runCmd(rev map[string]string) string {
 	} else {
 		cmd = exec.Command(cmdLine[0])
 	}
-	cmd.Stdin = strings.NewReader("some input")
+	cmd.Stdin = strings.NewReader("cmdinput")
 	var out bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &out
@@ -194,7 +179,7 @@ func (cl *SrvClient) runCmd(rev map[string]string) string {
 	err := cmd.Run()
 	msg := ""
 	if err != nil {
-		msg = fmt.Sprintf("action:Server,ip:%v,msg:[Error]%v",serverIP,fmt.Sprint(err) + "-" + stderr.String())		
+		msg = fmt.Sprintf("error %v",fmt.Sprint(err) + "-" + stderr.String())		
 	} else {
 		msg = out.String()
 	} 
@@ -209,21 +194,20 @@ func (cl *SrvClient) CheckUser() bool {
 }
 
 func Listen(port string) {
-	clientOutgoing = make(chan []byte) 
-	clientIncoming = make(chan []byte) 
+	 
 	info,_:=net.InterfaceAddrs()
 	var ipReg = regexp.MustCompile("[0-9]{1,3}.{3}[0-9]{1,3}")
 	
 	for _,addr := range info{
         ip := strings.Split(addr.String(),"/")[0]       
         if ipReg.MatchString(addr.String()) {
-	        if ip != "127.0.0.1" {
+	        if ip != "127.0.0.1" && ip != "0.0.0.0" {
 	        	serverIP = ip
 	        	break
 	        }
 	    }
     }
-	fmt.Printf("Server:%v Listen Port:%v\n",serverIP,port)
+	fmt.Printf("[Server]:%v:%v start listen.\n",serverIP,port)
 	l, err := net.Listen("tcp", port)
 	if err != nil {
 		fmt.Printf("Listen Error:%v\n",err)
@@ -236,12 +220,11 @@ func Listen(port string) {
     	if err != nil {
     		log.Fatal(err)
     	}
-    	go ProcessConn(conn,clientOutgoing,clientIncoming)
+    	go ProcessConn(conn)
 	}
 }
 
-func ProcessConn(c *net.TCPConn,ch chan []byte,inch chan []byte) {
+func ProcessConn(c *net.TCPConn) {
 	client := new(SrvClient)
-	client.Init(c,ch,inch)
-	//srvClientList = append(srvClientList,client)
+	client.Init(c)
 }

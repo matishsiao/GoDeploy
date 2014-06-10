@@ -28,5 +28,6 @@ type ConfigsObject struct {
 type FileObject struct {
 	FileName string
 	FileSize int64
+	CmdIdx 	string
 	Data	[]byte
 }

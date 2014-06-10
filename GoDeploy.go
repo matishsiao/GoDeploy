@@ -11,14 +11,18 @@ import (
 	_ "os/signal"
 	"regexp"
 	"io/ioutil"
+	"strconv"
 )
 
-var version string = "0.0.2"
+var version string = "0.0.3"
 var configInfo ConfigInfo
 var help *bool
 var envConfig Configs
 var clientList map[string]*Client
 var clientChan chan string
+var processChan chan bool
+var cmdIdx int
+var scriptStatus bool
 var cmdReg = regexp.MustCompile("^cmd+|^help+|^exit+|^file+|^script+")
 func main() {
 	configInfo.FileName = flag.String("config", "./config.json", "set config file path.")
@@ -36,6 +40,7 @@ func main() {
 		fmt.Printf("-debug     Show debug trace message. Default value:%v\n", *configInfo.Debug)
 		fmt.Printf("-mode      Service mode:server,client default:server\n")
 		fmt.Printf("-version   Show version.\n")
+		fmt.Printf("-load      load script and run,with close\n")
 		fmt.Printf("-help      Show help information.\n")
 		os.Exit(0)
 	}
@@ -51,6 +56,7 @@ func main() {
 	}
 	setUlimit(10000)
 	clientChan = make(chan string)
+	processChan = make(chan bool)
 	envConfig = config
 	switch *configInfo.Mode {
 		case "server": 
@@ -58,36 +64,73 @@ func main() {
 		case "client":
 			clientList = make(map[string]*Client)
 			fmt.Printf(`You can keyin "help" to see more information.`+"\n")
-			fmt.Println("GoDeploy:> Start connect to servers.")
+			fmt.Println("Start connect to servers.")
+			
 			for _,v := range envConfig.Configs.ServerIP {
 				cl := &Client{Server:v,User:envConfig.Configs.User,Pwd:envConfig.Configs.Password,ClientChan:clientChan}
 				clientList[v] = cl
 				go cl.Connect(v+":"+envConfig.Configs.ServerPort)			
 			}
-			time.Sleep(1500 * time.Millisecond)
+			fmt.Println("connecting...")
+			
+			time.Sleep(5 * time.Second)			
+			fmt.Println("----------------[Server status]---------------")	
+			for _,v := range clientList {
+				if v != nil {
+					fmt.Printf("[%s][Connection]:%v [Login]:%v\n",v.Server,v.Connected,v.Login)
+					if !v.Login {
+						v.Processing = false
+					} 
+				}
+			}
+			fmt.Printf("----------------------------------------------\n\n")
+			
+			go receiveChan()
+			go checkServerHealth()
+						
 			if *configInfo.Load != "" {
-				sendScript(*configInfo.Load, true)
-			} else {
-				go Input()
+				go sendScript(*configInfo.Load, true)
+			} else {				
 				cmdEndPos()	
 			}
+			go Input()
+			
 		default:
 			fmt.Printf("No sure mode,Please use -help to see more information.\n")
 			os.Exit(0)
 	}
-	go receiveChan()
-	go checkServerHealth()
+	
+	
+	
 	
 	for {
 		configWatcher()
+		if getConnectionListCount() == 0 &&  *configInfo.Mode != "server"{
+			cmdEndPos()
+			fmt.Printf("[Error] no servers has connected.exit")
+			os.Exit(0)
+		}
 		time.Sleep(500 * time.Millisecond)
 	}	
 }
 
 func receiveChan() {
 	for {
-		rev := <-clientChan		
-		if len(rev) > 0 && getConnectionListCount() == getServerProcessedCount() && getConnectionListCount() > 0{			
+		data := <-clientChan
+		revMsg := strings.Split(data,`&`)		
+		rev := make(map[string]string)
+		for _,v := range revMsg {
+			msg :=  strings.Split(v,`=`)
+			if len(msg) == 2 {			
+				rev[msg[0]] = msg[1]
+			}
+		}
+		//fmt.Println("rev:",rev,cmdIdx,getConnectionListCount(),getServerProcessedCount())
+		if rev["cmdIdx"] == strconv.Itoa(cmdIdx) && getConnectionListCount() == getServerProcessedCount() && getConnectionListCount() > 0{		
+			cmdIdx++
+			if scriptStatus {
+				processChan <- true
+			}			
 			cmdEndPos()	
 		}
 	}
@@ -96,9 +139,10 @@ func receiveChan() {
 func getConnectionListCount() int {
 	var count int = 0
 	for _,v := range clientList {
-		if v != nil && v.Connected {
+		if v != nil && v.Connected && v.Login {
 			count++
 		}
+		//fmt.Printf("Connection:%v %v %v\n",v.Server,v.Login,v.Processing)
 	}
 	return count
 }
@@ -106,9 +150,11 @@ func getConnectionListCount() int {
 func getServerProcessedCount() int {
 	var count int = 0
 	for _,v := range clientList {
-		if v != nil && v.Connected && !v.Processing {
+		if v != nil && v.Connected  && v.Login && !v.Processing {
 			count++
 		}
+		//fmt.Printf("Process:%v %v %v\n",v.Server,v.Login,v.Processing)
+		
 	}
 	return count
 }
@@ -116,7 +162,7 @@ func getServerProcessedCount() int {
 func checkServerHealth() {
 	for {
 		for _,v := range clientList {
-			if v != nil {
+			if v != nil && !v.Processing {
 				v.Write([]byte("health"))
 			}
 		}
@@ -127,15 +173,16 @@ func checkServerHealth() {
 
 func Input() {
 	for {
-   		cmdReader := bufio.NewReader(os.Stdin)
-   		
-		cmdStr, _ := cmdReader.ReadString('\n')
-		cmdStr = strings.Trim(cmdStr, "\r\n")   
-		sendCmd(cmdStr)
+		if !scriptStatus {
+	   		cmdReader := bufio.NewReader(os.Stdin)
+			cmdStr, _ := cmdReader.ReadString('\n')
+			cmdStr = strings.Trim(cmdStr, "\r\n")   
+			sendCmd(cmdStr)
+		}
 	}	
 }
 
-func sendCmd(cmdStr string) {
+func sendCmd(cmdStr string) bool {	
 	cmd := ""
 	if cmdStr != "" {			
 		if strings.Index(cmdStr," ") != -1 {
@@ -144,21 +191,24 @@ func sendCmd(cmdStr string) {
 			cmd = cmdStr
 		} 
 	} else {
-		return 
+		cmdEndPos()
+		return false
 	}
+	
 	switch cmd {
 			case "help":
 				fmt.Printf("[Deploy help]\n")
 				fmt.Printf("Input command list:\n")
-				fmt.Printf("1.cmd: Send command to server\n")
-				fmt.Printf("       example:cmd ls\n")					
-				fmt.Printf("2.file: Send file to server\n")
-				fmt.Printf("       example:file test.txt\n")					
-				fmt.Printf("3.script: Use script to run commands.\n")
-				fmt.Printf("       example:script test.dsh\n")				
-				fmt.Printf("4.status: Show all server status.\n")
-				fmt.Printf("5.help: Show help information.\n")
-				fmt.Printf("6.exit: Exit appclication.\n")
+				fmt.Printf("1.cmd:		Send command to server\n")
+				fmt.Printf("       			example:cmd ls\n")					
+				fmt.Printf("2.file: 	Send file to server\n")
+				fmt.Printf("       			example:file test.txt\n")					
+				fmt.Printf("3.script: 	Use script to run commands.\n")
+				fmt.Printf("	  	    	example:script test.dsh\n")				
+				fmt.Printf("4.status:	Show all server status.\n")
+				fmt.Printf("5.env:		Show all server os information.\n")
+				fmt.Printf("6.help:		Show help information.\n")
+				fmt.Printf("7.exit:		Exit appclication.\n")
 				cmdEndPos()	
 			case "reconnect":
 				go reconnect()
@@ -177,62 +227,72 @@ func sendCmd(cmdStr string) {
 				FileName := cmdStr[strings.Index(cmdStr," ")+1:]							
 				file, e := ioutil.ReadFile(FileName)
 				if e != nil {
-					fmt.Printf("Load file error: %v\n", e)
+					fmt.Printf("[Error]: %v\n", e)
+					if *configInfo.Load != "" {
+						fmt.Println("[System]:Exit")
+						os.Exit(1)
+					}
+					scriptStatus = false					
 				}
 				if file != nil && len(file) > 0 {
 					for _,v := range clientList {
-						if v != nil && v.Connected {
-							go v.SendFile(FileName,file)
+						if v != nil && v.Connected && v.Login {
+							go v.SendFile(FileName,file,cmdIdx)
 						}
 					}
 				} else {
-					fmt.Println("file error: file is nil or file size is zero")
+					fmt.Println("[Error]: File is nil or file size is zero")					
+					scriptStatus = false
+					return false
 					cmdEndPos()				
 				}
 			case "env":
 				for _,v := range clientList {
 					if v != nil && v.Connected {
-						v.InputCmd(cmd)
+						v.InputCmd(cmdStr,cmdIdx)
 					}
 				}
 			case "script":
 				sendScript(cmdStr, false)
-			default:
-			if strings.Index(cmdStr," ") != -1 && cmdReg.MatchString(cmdStr) {
-				for _,v := range clientList {
-					if v != nil && v.Connected {
-						v.InputCmd(cmdStr)
+			case "cmd":
+				if strings.Index(cmdStr," ") != -1 && cmdReg.MatchString(cmdStr) {					
+					for _,v := range clientList {
+						if v != nil && v.Connected && v.Login {
+							v.InputCmd(cmdStr,cmdIdx)
+						}
 					}
 				}
-			} else {
-				fmt.Printf("Wrong command input. You can use help to see more.\n")		
-				cmdEndPos()				
-			}				
+			default:			
+			fmt.Printf("[Error]: Wrong command input. You can use help to see more.\n")		
+			cmdEndPos()				
+							
 	}	
+	return true
 }
 
 func setUlimit(number uint64) {
 	var rLimit syscall.Rlimit
     err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
     if err != nil {
-        fmt.Println("Error Getting Rlimit ", err)
-    }
-    fmt.Println(rLimit)
+        fmt.Println("[Error]: Getting Rlimit ", err)
+    }    
     rLimit.Max = number
     rLimit.Cur = number
     err = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rLimit)
     if err != nil {
-        fmt.Println("Error Setting Rlimit ", err)
+        fmt.Println("[Error]: Setting Rlimit ", err)
     }
     err = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
     if err != nil {
-        fmt.Println("Error Getting Rlimit ", err)
+        fmt.Println("[Error]: Getting Rlimit ", err)
     }
-    fmt.Println("Rlimit Final", rLimit)
+    
 }
 
 func cmdEndPos(){
-	fmt.Printf("GoDeploy:>")	
+	if *configInfo.Load == "" {
+		fmt.Printf("GoDeploy:>")
+	}	
 }
 
 func reconnect() {
@@ -245,25 +305,54 @@ func reconnect() {
 	cmdEndPos()	
 }
 
+
+
 func sendScript(cmdStr string, load bool) {
+	scriptStatus = true
 	FileName := cmdStr[strings.Index(cmdStr," ")+1:]
-	fmt.Printf("load script file:%v\n",FileName)			
+	fmt.Printf("[Script]: Load script file[%v]\n",FileName)			
 	file, e := ioutil.ReadFile(FileName)
 	if e != nil {
-		fmt.Printf("Load script error: %v\n", e)
+		fmt.Printf("[Error]: %v\n", e)
 	}
 					
 	var script = strings.Split(string(file),"\n")
-	for k,v := range script {
-		fmt.Printf("[%d]:%v \n",k,v)
-		if strings.Index(v," ") != -1 && cmdReg.MatchString(v) {
-			sendCmd(v)						
-		} else {
-			fmt.Printf("Script Wrong command input.\n")
-		}
-		time.Sleep(1 * time.Second)						
+	time.Sleep(1500 * time.Millisecond)
+	
+	for k,v := range script {		
+		if len(v) > 1 {
+			fmt.Printf("[Script][Command][%d]:%v \n",k,v)
+			if strings.Index(v," ") != -1 && cmdReg.MatchString(v) {
+				ok := sendCmd(v)				
+				if ok {
+					nextScript()
+				} else {
+					fmt.Printf("[Script][Command]:Have error leave now.\n")		
+					cmdEndPos()	
+					scriptStatus = false			
+					return
+				}						
+			} else {
+				fmt.Printf("[Error]: Script Wrong command input.\n")
+			}
+						
+		}						
 	}
+	cmdEndPos()	
+	scriptStatus = false
 	if load {
 		sendCmd("exit")
+	}
+}
+
+func nextScript() {
+	for {
+		next := <- processChan
+		if next {
+			fmt.Printf("[Script]: Process success.Send next script.\n")		
+			break
+		} else {
+			break
+		}
 	}
 }

@@ -7,8 +7,7 @@ import (
 	"encoding/json"
 )
 
-func loadConfigs() (bool,Configs) {
-	fmt.Printf("load config file:%s\n", *configInfo.FileName)
+func loadConfigs() (bool,Configs) {	
 	file, e := ioutil.ReadFile(*configInfo.FileName)
 	if e != nil {
 		fmt.Printf("Load config error: %v\n", e)
@@ -43,8 +42,7 @@ func configWatcher() {
 		configInfo.Size = info.Size()
 		configInfo.ModTime = info.ModTime()
 		ok,config := loadConfigs()
-		if ok {			
-			fmt.Printf("configWatcher:%v\n",config)
+		if ok {
 			envConfig = config
 		}
 

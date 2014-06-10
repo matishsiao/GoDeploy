@@ -17,7 +17,6 @@ func WriteToLogFile(remote string, msg string) {
 	f, err := os.OpenFile(fileName, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0777)
 
 	if err != nil {
-		//panic(err)
 		log.Fatalf("error opening file: %v", err)
 	}
 
