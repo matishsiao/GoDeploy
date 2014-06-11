@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"io/ioutil"
 	"strconv"
+	"github.com/matishsiao/goInfo"
 )
 
 var version string = "0.0.3"
@@ -23,13 +24,15 @@ var clientChan chan string
 var processChan chan bool
 var cmdIdx int
 var scriptStatus bool
-var cmdReg = regexp.MustCompile("^cmd+|^help+|^exit+|^file+|^script+")
+var cmdReg = regexp.MustCompile("^cmd+|^help+|^exit+|^file+|^script+|^get+")
 func main() {
 	configInfo.FileName = flag.String("config", "./config.json", "set config file path.")
 	configInfo.Debug = flag.Bool("debug", false, "show debug trace message.")
 	configInfo.Version = flag.Bool("version", false, "GoDeploy version.")
-	configInfo.Mode = flag.String("mode", "server", "service mode:server,client default:server")
+	configInfo.Mode = flag.String("mode", "client", "service mode:server,client default:client")
 	configInfo.Load = flag.String("load", "", "load script to run.")
+	configInfo.Group = flag.String("group", "", "connect group servers")
+	configInfo.Server = flag.String("server", "", "connect specific server")
 	help = flag.Bool("help", false, "Show help information.")
 	flag.Parse()
 	
@@ -38,7 +41,9 @@ func main() {
 		fmt.Println("-version", version)		
 		fmt.Printf("-config    Set cofing file path. Default value:%v\n", *configInfo.FileName)
 		fmt.Printf("-debug     Show debug trace message. Default value:%v\n", *configInfo.Debug)
-		fmt.Printf("-mode      Service mode:server,client default:server\n")
+		fmt.Printf("-mode      Service mode:server,client default:client\n")
+		fmt.Printf("-group     connect specific group servers\n")
+		fmt.Printf("-server    connect specific server\n")
 		fmt.Printf("-version   Show version.\n")
 		fmt.Printf("-load      load script and run,with close\n")
 		fmt.Printf("-help      Show help information.\n")
@@ -58,6 +63,7 @@ func main() {
 	clientChan = make(chan string)
 	processChan = make(chan bool)
 	envConfig = config
+	ServerInfo = goInfo.GetInfo()
 	switch *configInfo.Mode {
 		case "server": 
 			go Listen(":"+envConfig.Configs.ServerPort)
@@ -65,15 +71,31 @@ func main() {
 			clientList = make(map[string]*Client)
 			fmt.Printf(`You can keyin "help" to see more information.`+"\n")
 			fmt.Println("Start connect to servers.")
-			
-			for _,v := range envConfig.Configs.ServerIP {
-				cl := &Client{Server:v,User:envConfig.Configs.User,Pwd:envConfig.Configs.Password,ClientChan:clientChan}
-				clientList[v] = cl
-				go cl.Connect(v+":"+envConfig.Configs.ServerPort)			
+			if *configInfo.Server == "" {
+				for _,v := range envConfig.Configs.Server {
+					fmt.Printf("[Server][%v]:%v\n",v.Group,v.Ip)
+					if *configInfo.Group != "" {
+						if v.Group == *configInfo.Group {
+							connect(v)
+						}
+					} else {
+						connect(v)
+					}
+				}
+			} else {
+				var ipReg = regexp.MustCompile(`([0-9]{1,3}\.){3}[0-9]{1,3}$`)
+				 fmt.Println(ipReg.FindAllStringSubmatch(*configInfo.Server, -1))
+        		if ipReg.MatchString(*configInfo.Server) {        			
+					connect(ServerNode{Ip:*configInfo.Server,Group:"Specific"})
+	    		} else {
+	    			fmt.Println("[Error]: Server ip format has wrong.Tcp4 accept only.")
+	    			os.Exit(0)
+	    		}
+				
 			}
 			fmt.Println("connecting...")
 			
-			time.Sleep(5 * time.Second)			
+			time.Sleep(3 * time.Second)			
 			fmt.Println("----------------[Server status]---------------")	
 			for _,v := range clientList {
 				if v != nil {
@@ -105,13 +127,18 @@ func main() {
 	
 	for {
 		configWatcher()
-		if getConnectionListCount() == 0 &&  *configInfo.Mode != "server"{
-			cmdEndPos()
-			fmt.Printf("[Error] no servers has connected.exit")
+		if getConnectionListCount() == 0 &&  *configInfo.Mode != "server" {			
+			fmt.Println("[Error] no servers has connected.exit")
 			os.Exit(0)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}	
+}
+
+func connect(v ServerNode) {
+	cl := &Client{Server:v.Ip,User:envConfig.Configs.User,Pwd:envConfig.Configs.Password,ClientChan:clientChan}
+	clientList[v.Ip] = cl
+	go cl.Connect(v.Ip+":"+envConfig.Configs.ServerPort)
 }
 
 func receiveChan() {
@@ -142,7 +169,6 @@ func getConnectionListCount() int {
 		if v != nil && v.Connected && v.Login {
 			count++
 		}
-		//fmt.Printf("Connection:%v %v %v\n",v.Server,v.Login,v.Processing)
 	}
 	return count
 }
@@ -152,9 +178,7 @@ func getServerProcessedCount() int {
 	for _,v := range clientList {
 		if v != nil && v.Connected  && v.Login && !v.Processing {
 			count++
-		}
-		//fmt.Printf("Process:%v %v %v\n",v.Server,v.Login,v.Processing)
-		
+		}		
 	}
 	return count
 }
@@ -200,15 +224,18 @@ func sendCmd(cmdStr string) bool {
 				fmt.Printf("[Deploy help]\n")
 				fmt.Printf("Input command list:\n")
 				fmt.Printf("1.cmd:		Send command to server\n")
-				fmt.Printf("       			example:cmd ls\n")					
-				fmt.Printf("2.file: 	Send file to server\n")
-				fmt.Printf("       			example:file test.txt\n")					
-				fmt.Printf("3.script: 	Use script to run commands.\n")
+				fmt.Printf("       			example:cmd ls\n")
+				fmt.Printf("2.env:		Show all server os information.\n")
+				fmt.Printf("3.exit:		Exit appclication.\n")					
+				fmt.Printf("4.file: 	Send file to server\n")
+				fmt.Printf("       			example:file test.txt\n")	
+				fmt.Printf("5.get:		get file from all connect servers\n")
+				fmt.Printf("6.help:		Show help information.\n")								
+				fmt.Printf("7.script: 	Use script to run commands.\n")
 				fmt.Printf("	  	    	example:script test.dsh\n")				
-				fmt.Printf("4.status:	Show all server status.\n")
-				fmt.Printf("5.env:		Show all server os information.\n")
-				fmt.Printf("6.help:		Show help information.\n")
-				fmt.Printf("7.exit:		Exit appclication.\n")
+				fmt.Printf("8.status:	Show all server status.\n")				
+				
+				
 				cmdEndPos()	
 			case "reconnect":
 				go reconnect()
@@ -255,13 +282,22 @@ func sendCmd(cmdStr string) bool {
 			case "script":
 				sendScript(cmdStr, false)
 			case "cmd":
-				if strings.Index(cmdStr," ") != -1 && cmdReg.MatchString(cmdStr) {					
+				if strings.Index(cmdStr,"cmd ") != -1 && cmdReg.MatchString(cmdStr) {					
 					for _,v := range clientList {
 						if v != nil && v.Connected && v.Login {
 							v.InputCmd(cmdStr,cmdIdx)
 						}
 					}
 				}
+			case "get":
+				if strings.Index(cmdStr,"get ") != -1 && cmdReg.MatchString(cmdStr) {	
+					FileName := cmdStr[strings.Index(cmdStr," ")+1:]			
+					for _,v := range clientList {
+						if v != nil && v.Connected && v.Login {
+							v.GetFile(FileName,cmdIdx)
+						}
+					}
+				}				
 			default:			
 			fmt.Printf("[Error]: Wrong command input. You can use help to see more.\n")		
 			cmdEndPos()				

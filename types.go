@@ -12,6 +12,8 @@ type ConfigInfo struct {
 	Version  *bool
 	Mode	*string	
 	Load	*string
+	Group	*string
+	Server	*string
 }
 
 type Configs struct {
@@ -19,10 +21,15 @@ type Configs struct {
 }
 
 type ConfigsObject struct {
-	ServerIP	[]string
+	Server	[]ServerNode
 	ServerPort	string
 	User		string
 	Password	string
+}
+
+type ServerNode struct {
+	Ip string
+	Group string
 }
 
 type FileObject struct {

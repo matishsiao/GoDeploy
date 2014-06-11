@@ -12,6 +12,7 @@ import(
 	"time"
 	"regexp"
 	"github.com/matishsiao/goInfo"
+	"io/ioutil"
 )
 
 type SrvClient struct {
@@ -29,7 +30,6 @@ var ServerInfo *goInfo.GoInfoObject
 
 func (cl *SrvClient) Init(conn *net.TCPConn) {
 	cl.Conn = conn
-	ServerInfo = goInfo.GetInfo()
 	cl.Read()
 }
 
@@ -99,9 +99,9 @@ func (cl *SrvClient) Process(data []byte) {
 									cl.File = true
 									fileName := rev["file"]
 									if ServerInfo.OS != "windows" && strings.LastIndex(rev["file"],"/") != -1 {
-										fileName = rev["file"][strings.LastIndex(rev["file"],"/"):]
+										fileName = rev["file"][strings.LastIndex(rev["file"],"/")+1:]
 									} else if strings.LastIndex(rev["file"],"\\") != -1 {
-										fileName = rev["file"][strings.LastIndex(rev["file"],"\\"):]
+										fileName = rev["file"][strings.LastIndex(rev["file"],"\\")+1:]
 									}	
 									cl.FileObj = &FileObject{FileName:fileName,FileSize:fileSize,CmdIdx:rev["cmdIdx"]}
 								} else {
@@ -109,6 +109,24 @@ func (cl *SrvClient) Process(data []byte) {
 									cl.Write([]byte(msg))
 								}					
 							}
+						}
+					case "get":
+						if cl.Login {					
+							file, e := ioutil.ReadFile(rev["file"])
+							if e != nil {
+								fmt.Printf("[Open][Error]: %v\n", e)
+							}
+							if file != nil && len(file) > 0 {
+								msg := fmt.Sprintf("action=file&type=send&msg=%v&fileName=%v&size=%v&cmdIdx=%s","start send",rev["file"],len(file),rev["cmdIdx"])
+								cl.Write([]byte(msg))
+								time.Sleep(1000 * time.Millisecond)
+								cl.Write(file)
+							} else {				
+								msg := fmt.Sprintf("action=file&type=error&msg=%v&cmdIdx=%s","[Error]: File is nil or file size is zero",rev["cmdIdx"])								
+								cl.Write([]byte(msg))
+								return			
+							}
+							
 						}
 					case "env":
 						if cl.Login {	
@@ -196,18 +214,18 @@ func (cl *SrvClient) CheckUser() bool {
 func Listen(port string) {
 	 
 	info,_:=net.InterfaceAddrs()
-	var ipReg = regexp.MustCompile("[0-9]{1,3}.{3}[0-9]{1,3}")
+	var ipReg = regexp.MustCompile(`([0-9]{1,3}\.){3}[0-9]{1,3}$`)
 	
 	for _,addr := range info{
         ip := strings.Split(addr.String(),"/")[0]       
-        if ipReg.MatchString(addr.String()) {
+        if ipReg.MatchString(ip) {
 	        if ip != "127.0.0.1" && ip != "0.0.0.0" {
 	        	serverIP = ip
 	        	break
 	        }
 	    }
     }
-	fmt.Printf("[Server]:%v:%v start listen.\n",serverIP,port)
+	fmt.Printf("[Server] %v%v start listen.\n",serverIP,port)
 	l, err := net.Listen("tcp", port)
 	if err != nil {
 		fmt.Printf("Listen Error:%v\n",err)
