@@ -1,17 +1,31 @@
 # Introduction:
   GoDeploy is simple deploy tool by Golang.
   
-  It can help you to quickly send command or file to your server groups.
+  It can help you to quickly send commands or file to your server groups.
   
   one client with mutli servers.
   
 ## Version:
 
-version:0.0.2
+version:0.0.3
 
 ## Futures
 
-  
+-config    Set cofing file path. Default value:./config.json
+
+-debug     Show debug trace message. Default value:false
+
+-mode      Service mode:server,client default:client
+
+-group     Connect specific group servers
+
+-server    Connect specific server
+
+-version   Show version
+
+-load      Load script and run,with exit
+
+-help      Show help information
   
 ## Install:
 ```sh
@@ -23,28 +37,29 @@ version:0.0.2
 ## Configuration format:
 ```sh
     {
-	  "Configs":{
-	  	"ServerIP":[	//Deploy receive server ip list		
-  			"10.7.9.83",
-			  "10.7.9.90"
-		  ],
-		  "ServerPort":"9000",//receive server port
-		  "User":"abc",//user account
-		  "Password":"abc123"//user password
-	  }
-  }
+	"Configs":{
+		"Server":[			
+			{"Ip":"10.7.9.90","Group":"dev"},
+			{"Ip":"10.7.9.83","Group":"dev"},
+			{"Ip":"10.7.9.163","Group":"prd"}
+		],
+		"ServerPort":"9000",
+		"User":"abc",
+		"Password":"abc123"
+	}
+   }
 ```
 
 ## Run:
 
-   Client mode
+   Client mode(default mode)
 ```sh
-   ./GoDeploy -mode client
+   ./GoDeploy
 ```
 
    Server mode
 ```sh
-   ./GoDeploy
+   ./GoDeploy -mode server
 ```
 
    Get more informatiion
@@ -53,7 +68,7 @@ version:0.0.2
    ./GoDeploy -help 
 ```
 
-## Example:
+## Client Example:
 
 ```sh   
    cmd ls
@@ -66,34 +81,29 @@ version:0.0.2
 ```
 
 ## Commands:
-
-   1.cmd: Send command to server.
-    
-   example:
-    
-        cmd ls
-        
-        cmd df -h
-        
-   2.file: Send file to server.
-    
-   example:
-        
-        file test.txt
-        
-        file /var/tmp/test.txt //this file will save to server same directory.
-    
-   3.script: Use script to run commands.
-    
-   example:
-    
-        script test.dsh
-    
-   4.status: Show all server status.
-    
-   5.help: Show help information.
-    
-   6.exit: Exit appclication.
-
+	
+	1.cmd:		Send command to server.
+	
+       			example:cmd ls
+       			
+	2.env:		Show all server os information.
+	
+	3.exit:		Exit appclication.
+	
+	4.file: 	Send file to server,It will save to server site file/ directory.
+	
+       			example:file test.txt
+	
+	5.get:		get file from all connect servers,the file will save to file/.
+	
+	6.help:		Show help information.
+	
+	7.script: 	Use script to run commands.
+	
+	  	    	example:script test.dsh
+	  	    	
+	8.status:	Show all server status.
+	
 ##License and Copyright
+
 This software is Copyright 2012-2014 Matis Hsiao.
