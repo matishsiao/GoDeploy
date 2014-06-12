@@ -13,9 +13,13 @@ import (
 	"io/ioutil"
 	"strconv"
 	"github.com/matishsiao/goInfo"
+	"sync"
+	_ "compress/gzip"
+	_ "bytes"
 )
+const layout = "2006-01-02-15-04-05"
 
-var version string = "0.0.3"
+var version string = "0.0.4"
 var configInfo ConfigInfo
 var help *bool
 var envConfig Configs
@@ -23,8 +27,55 @@ var clientList map[string]*Client
 var clientChan chan string
 var processChan chan bool
 var cmdIdx int
-var scriptStatus bool
+var cmdScripts []string
 var cmdReg = regexp.MustCompile("^cmd+|^help+|^exit+|^file+|^script+|^get+")
+var cLock CommandLock 
+
+type CommandLock struct {
+	lock *sync.Mutex
+	InputLock bool
+ 	UseScript bool
+}
+
+func (cl *CommandLock) KeyboardLock() {
+	cl.lock.Lock()
+	cl.InputLock = true
+	cl.lock.Unlock()
+}
+
+func (cl *CommandLock) KeyboardUnLock() {
+	cl.lock.Lock()	
+	cl.InputLock = false
+	cl.lock.Unlock()
+}
+
+func (cl *CommandLock) ScriptLock() {
+	cl.lock.Lock()
+	cl.UseScript = true
+	cl.lock.Unlock()
+}
+
+func (cl *CommandLock) ScriptUnLock() {
+	cl.lock.Lock()	
+	cl.UseScript = false
+	cl.lock.Unlock()
+}
+
+func Init() {
+	ok,config := loadConfigs()
+	if !ok {
+		os.Exit(0)
+	}
+	setUlimit(10000)
+	clientChan = make(chan string)
+	processChan = make(chan bool)
+	cLock = CommandLock{&sync.Mutex{},false,false}
+	
+	envConfig = config
+	ServerInfo = goInfo.GetInfo()
+}
+
+
 func main() {
 	configInfo.FileName = flag.String("config", "./config.json", "set config file path.")
 	configInfo.Debug = flag.Bool("debug", false, "show debug trace message.")
@@ -33,6 +84,7 @@ func main() {
 	configInfo.Load = flag.String("load", "", "load script to run.")
 	configInfo.Group = flag.String("group", "", "connect group servers")
 	configInfo.Server = flag.String("server", "", "connect specific server")
+	configInfo.Record = flag.Bool("record", false, "Record command to script file")
 	help = flag.Bool("help", false, "Show help information.")
 	flag.Parse()
 	
@@ -44,6 +96,7 @@ func main() {
 		fmt.Printf("-mode      Service mode:server,client default:client\n")
 		fmt.Printf("-group     Connect specific group servers\n")
 		fmt.Printf("-server    Connect specific server\n")
+		fmt.Printf("-record    Record command to script file\n")
 		fmt.Printf("-version   Show version.\n")
 		fmt.Printf("-load      Load script and run,with close\n")
 		fmt.Printf("-help      Show help information\n")
@@ -55,15 +108,8 @@ func main() {
 		os.Exit(0)
 	}	
 	
-	ok,config := loadConfigs()
-	if !ok {
-		os.Exit(0)
-	}
-	setUlimit(10000)
-	clientChan = make(chan string)
-	processChan = make(chan bool)
-	envConfig = config
-	ServerInfo = goInfo.GetInfo()
+	Init()
+	
 	switch *configInfo.Mode {
 		case "server": 
 			go Listen(":"+envConfig.Configs.ServerPort)
@@ -95,7 +141,7 @@ func main() {
 			}
 			fmt.Println("connecting...")
 			
-			time.Sleep(3 * time.Second)			
+			time.Sleep(time.Duration(envConfig.Configs.ConnectTimeout) * time.Second)			
 			fmt.Println("----------------[Server status]---------------")	
 			for _,v := range clientList {
 				if v != nil {
@@ -108,14 +154,17 @@ func main() {
 			fmt.Printf("----------------------------------------------\n\n")
 			
 			go receiveChan()
-			go checkServerHealth()
-						
+			go Input()
+			
+			if *configInfo.Record {
+				fmt.Println("start recording..")
+			} 		
 			if *configInfo.Load != "" {
 				go sendScript(*configInfo.Load, true)
 			} else {				
 				cmdEndPos()	
 			}
-			go Input()
+			
 			
 		default:
 			fmt.Printf("No sure mode,Please use -help to see more information.\n")
@@ -152,13 +201,14 @@ func receiveChan() {
 				rev[msg[0]] = msg[1]
 			}
 		}
-		//fmt.Println("rev:",rev,cmdIdx,getConnectionListCount(),getServerProcessedCount())
+		//fmt.Printf("rev:%v,idx:%v,revIdx:%v,conn:%v,process:%v,kL:%v,uS:%v\n",data,cmdIdx,rev["cmdIdx"],getConnectionListCount(),getServerProcessedCount(),cLock.InputLock,cLock.UseScript)
 		if rev["cmdIdx"] == strconv.Itoa(cmdIdx) && getConnectionListCount() == getServerProcessedCount() && getConnectionListCount() > 0{		
 			cmdIdx++
-			if scriptStatus {
+			//fmt.Printf("complied.:%v,idx:%v,revIdx:%v,conn:%v,process:%v,kL:%v,uS:%v\n",data,cmdIdx,rev["cmdIdx"],getConnectionListCount(),getServerProcessedCount(),cLock.InputLock,cLock.UseScript)
+			if cLock.UseScript {
 				processChan <- true
-			}			
-			cmdEndPos()	
+			} 
+			cmdEndPos()
 		}
 	}
 }
@@ -183,21 +233,9 @@ func getServerProcessedCount() int {
 	return count
 }
 
-func checkServerHealth() {
-	for {
-		for _,v := range clientList {
-			if v != nil && !v.Processing {
-				v.Write([]byte("health"))
-			}
-		}
-		time.Sleep(250 * time.Millisecond)
-	}
-}
-
-
 func Input() {
 	for {
-		if !scriptStatus {
+		if !cLock.InputLock {
 	   		cmdReader := bufio.NewReader(os.Stdin)
 			cmdStr, _ := cmdReader.ReadString('\n')
 			cmdStr = strings.Trim(cmdStr, "\r\n")   
@@ -218,7 +256,9 @@ func sendCmd(cmdStr string) bool {
 		cmdEndPos()
 		return false
 	}
-	
+	if *configInfo.Record && cmdStr != "exit" {		
+		cmdScripts = append(cmdScripts,cmdStr)
+	} 
 	switch cmd {
 			case "help":
 				fmt.Printf("[Deploy help]\n")
@@ -233,13 +273,18 @@ func sendCmd(cmdStr string) bool {
 				fmt.Printf("6.help:		Show help information.\n")								
 				fmt.Printf("7.script: 	Use script to run commands.\n")
 				fmt.Printf("	  	    	Example:script test.dsh\n")				
-				fmt.Printf("8.status:	Show all server status.\n")				
-				
-				
+				fmt.Printf("8.status:	Show all server status.\n")		
 				cmdEndPos()	
 			case "reconnect":
 				go reconnect()
 			case "exit":
+				
+				if *configInfo.Record {
+					scripts := ArrayToString(cmdScripts,"\n")					
+					fileName := fmt.Sprintf("%s-%s.ds",time.Now().Format(layout),envConfig.Configs.User)					
+					SaveFile("script",fileName,[]byte(scripts))
+					fmt.Printf("Save record file to script/%v\n",fileName)
+				}
 				fmt.Printf("Good bye.Have nice day.\n")
 				os.Exit(0)
 			case "status":
@@ -251,6 +296,7 @@ func sendCmd(cmdStr string) bool {
 				}
 				cmdEndPos()	
 			case "file":				
+				cLock.KeyboardLock()
 				FileName := cmdStr[strings.Index(cmdStr," ")+1:]							
 				file, e := ioutil.ReadFile(FileName)
 				if e != nil {
@@ -259,20 +305,26 @@ func sendCmd(cmdStr string) bool {
 						fmt.Println("[System]:Exit")
 						os.Exit(1)
 					}
-					scriptStatus = false					
+					cLock.KeyboardUnLock()					
 				}
 				if file != nil && len(file) > 0 {
+					/*var fileZip bytes.Buffer
+					w := gzip.NewWriter(&fileZip)
+					w.Write(file)
+					w.Close()*/
 					for _,v := range clientList {
 						if v != nil && v.Connected && v.Login {
 							go v.SendFile(FileName,file,cmdIdx)
 						}
 					}
+					cLock.KeyboardUnLock()	
 				} else {
 					fmt.Println("[Error]: File is nil or file size is zero")					
-					scriptStatus = false
+					cLock.KeyboardUnLock()	
 					return false
 					cmdEndPos()				
 				}
+				
 			case "env":
 				for _,v := range clientList {
 					if v != nil && v.Connected {
@@ -341,31 +393,33 @@ func reconnect() {
 	cmdEndPos()	
 }
 
-
-
 func sendScript(cmdStr string, load bool) {
-	scriptStatus = true
 	FileName := cmdStr[strings.Index(cmdStr," ")+1:]
 	fmt.Printf("[Script]: Load script file[%v]\n",FileName)			
 	file, e := ioutil.ReadFile(FileName)
 	if e != nil {
 		fmt.Printf("[Error]: %v\n", e)
-	}
-					
-	var script = strings.Split(string(file),"\n")
-	time.Sleep(1500 * time.Millisecond)
-	
-	for k,v := range script {		
+		if load {
+			sendCmd("exit")
+		}
+		return
+	}					
+	var script = strings.Split(string(file),"\n")	
+	cLock.KeyboardLock()
+	cLock.ScriptLock()
+	for k,v := range script {
 		if len(v) > 1 {
 			fmt.Printf("[Script][Command][%d]:%v \n",k,v)
 			if strings.Index(v," ") != -1 && cmdReg.MatchString(v) {
 				ok := sendCmd(v)				
 				if ok {
+					fmt.Printf("[Script][Command]:Wait response from servers\n")					
 					nextScript()
 				} else {
 					fmt.Printf("[Script][Command]:Have error leave now.\n")		
 					cmdEndPos()	
-					scriptStatus = false			
+					cLock.KeyboardUnLock()
+					cLock.ScriptUnLock()		
 					return
 				}						
 			} else {
@@ -375,19 +429,17 @@ func sendScript(cmdStr string, load bool) {
 		}						
 	}
 	cmdEndPos()	
-	scriptStatus = false
+	cLock.KeyboardUnLock()
+	cLock.ScriptUnLock()	
 	if load {
 		sendCmd("exit")
 	}
 }
 
 func nextScript() {
-	for {
-		next := <- processChan
+	for next := range processChan {
 		if next {
-			fmt.Printf("[Script]: Process success.Send next script.\n")		
-			break
-		} else {
+			fmt.Printf("[Script]:Process success.Send next script\n")
 			break
 		}
 	}

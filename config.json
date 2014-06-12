@@ -3,10 +3,11 @@
 		"Server":[			
 			{"Ip":"10.7.9.90","Group":"dev"},
 			{"Ip":"10.7.9.83","Group":"dev"},
-			{"Ip":"10.7.9.163","Group":"dev"}
+			{"Ip":"10.7.9.53","Group":"dev"}
 		],
 		"ServerPort":"9000",
 		"User":"abc",
-		"Password":"abc123"
+		"Password":"abc123",
+		"ConnectTimeout":2
 	}
 }

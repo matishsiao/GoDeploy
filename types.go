@@ -14,6 +14,7 @@ type ConfigInfo struct {
 	Load	*string
 	Group	*string
 	Server	*string
+	Record 	*bool
 }
 
 type Configs struct {
@@ -25,6 +26,7 @@ type ConfigsObject struct {
 	ServerPort	string
 	User		string
 	Password	string
+	ConnectTimeout int
 }
 
 type ServerNode struct {

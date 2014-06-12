@@ -12,11 +12,13 @@ import(
 type Client struct {
 	Server string
 	Conn *net.TCPConn
-	Close bool
+	IsClose bool
 	Connected bool
 	User string
 	Pwd string
 	Login bool
+	Receive []byte
+	Msg string
 	ClientChan chan string
 	File bool
 	FileObj *FileObject
@@ -36,9 +38,7 @@ func (cl *Client) Write(data []byte) {
 		_,err := cl.Conn.Write(data)		
 		if err != nil {
 			fmt.Printf("Client write error:%v\n",err)
-			cl.Processing = false
-			cl.Conn.Close()		
-			cl.checkConneciton(true, false)
+			cl.Close()
 			cl.ClientChan <- "write failed"
 		}
 	} 
@@ -47,18 +47,21 @@ func (cl *Client) Write(data []byte) {
 func (cl *Client) Read() {
 	buf := make([]byte,2048)
 	for {
-		n, error := cl.Conn.Read(buf)
-	    if error != nil {
-	     	
-	    } else {
+		n, err := cl.Conn.Read(buf)
+	    if err != nil {
+	     	fmt.Printf("Client read error:%v\n",err)
+	     	cl.Close()
+	     	return
+	    } else {	    	
 	    	cl.Process(buf[:n])
 	    }
     }
 }
 
 func (cl *Client) Process(data []byte) {	
-	if !cl.File {		
-		revMsg := strings.Split(string(data),`&`)		
+	if !cl.File {
+		cl.Receive = append(cl.Receive,data...)		
+		revMsg := strings.Split(string(cl.Receive),`&`)		
 		rev := make(map[string]string)
 		for _,v := range revMsg {
 			msg :=  strings.Split(v,`=`)
@@ -72,24 +75,29 @@ func (cl *Client) Process(data []byte) {
 					 if rev["status"] == "success" {
 					 	cl.Login = true				 	
 					 } else {
-						cl.Conn.Close()		
-						cl.checkConneciton(true, false) 
+						cl.Close()
 					 }
 				case "server":
 				default:
-			}
+			}			
+		}
+		if _,idxOk := rev["cmdIdx"]; idxOk {
+			cl.Msg = string(cl.Receive)[strings.Index(string(cl.Receive),`&msg=`)+5:strings.Index(string(cl.Receive),`&cmdIdx`)]
+			cl.Receive = []byte{}
+		} else {
+			return
 		}
 		fmt.Printf("[%v]\n",cl.Server)	
 		fmt.Printf("      [type]:%v\n",rev["type"])
 		fmt.Printf("      [cmdIdx]:%v\n",rev["cmdIdx"])
-		strCount := strings.Count(rev["msg"],"\n")
+		strCount := strings.Count(cl.Msg,"\n")
 		if strCount > 1 {
-			rev["msg"] = strings.Replace(rev["msg"],"\n","\n        ",strCount -1)
-			fmt.Printf("      [msg]:\n        %v",rev["msg"])
+			cl.Msg = strings.Replace(cl.Msg,"\n","\n        ",strCount -1)
+			fmt.Printf("      [msg]:\n        %v",cl.Msg)
 		} else if strCount == 1{
-			fmt.Printf("      [msg]:%v",rev["msg"])
+			fmt.Printf("      [msg]:%v",cl.Msg)
 		} else {
-			fmt.Printf("      [msg]:%v\n",rev["msg"])
+			fmt.Printf("      [msg]:%v\n",cl.Msg)
 		}
 		cl.Processing = false	
 		cl.ClientChan <- string(data)
@@ -208,8 +216,14 @@ func (cl *Client) Printf(str string){
 	fmt.Printf("Client[%v]%v\n",cl.Server,str)	
 }
 
+func (cl *Client) Close() {	
+	cl.Processing = false
+	cl.Conn.Close()		
+	cl.checkConneciton(true, false)
+}
+
 func (cl *Client) checkConneciton(_close bool,_connected bool) {
-	cl.Close = _close
+	cl.IsClose = _close
 	cl.Connected = _connected
 }
 
@@ -236,6 +250,6 @@ func (cl *Client) Connect(addr string) {
 	cl.checkConneciton(false, true)
 	cl.Init(con)
 	msg := fmt.Sprintf("action:login,user:%s,pwd:%s",cl.User,cl.Pwd)
-	cl.Write([]byte(msg))
 	go cl.Read()
+	cl.Write([]byte(msg))	
 }

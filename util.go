@@ -24,3 +24,39 @@ func WriteToLogFile(remote string, msg string) {
 	log.SetOutput(f)
 	log.Println(logMsg)
 }
+
+func SaveFile(dir string,fileName string,data []byte) bool {
+	os.Mkdir(dir,0777)
+	fo, err := os.Create(dir +"/"+ fileName)
+	if err != nil {
+		fmt.Printf("File create error:%v\n",err)			
+		return false
+	}
+	// close fo on exit and check for its returned error
+	
+	
+		
+	if _, err := fo.Write(data); err != nil {
+		fmt.Printf("File Write Error:%v\n",err)
+		return false
+	}
+	
+	if err := fo.Close(); err != nil {
+	   fmt.Printf("File close error:%v\n",err)
+	   return false
+	}
+	
+	return true
+}
+
+func ArrayToString(data []string,point string) string {
+	var result string
+	var dataLen int = len(data)
+	for k,v := range data {
+		result += v
+		if k < dataLen - 1{
+			result += point
+		}
+	}
+	return result
+}
