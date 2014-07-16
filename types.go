@@ -22,11 +22,24 @@ type Configs struct {
 }
 
 type ConfigsObject struct {
-	Server	[]ServerNode
-	ServerPort	string
+	Server		ConfServer
+	Auth		ConfAuth
+	Client		ConfClient
+}
+
+type ConfServer struct {
+	List	[]ServerNode
+	Port	string
+	Timeout int
+}
+
+type ConfAuth struct {
 	User		string
 	Password	string
-	ConnectTimeout int
+}
+
+type ConfClient struct {
+	Timeout int
 }
 
 type ServerNode struct {

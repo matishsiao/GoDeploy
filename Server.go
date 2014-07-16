@@ -3,7 +3,7 @@ package main
 import(
 	"fmt"
 	"net"
-	"log"
+	_"log"
 	"strings"
 	"os/exec"
 	"bytes"
@@ -14,55 +14,63 @@ import(
 	"regexp"
 	"github.com/matishsiao/goInfo"
 	"io/ioutil"
-	"io"
+	"sync"
+	_ "io"
 	_ "compress/gzip"
 )
 
 type SrvClient struct {
 	Conn *net.TCPConn
+	mu *sync.Mutex
 	User string
 	Token string
 	File bool
 	FileObj *FileObject
 	Login bool
+	Connected bool
 }
 
-var srvClientList map[string]*SrvClient
+var srvClientList []*SrvClient
 var serverIP string
 var ServerInfo *goInfo.GoInfoObject
 
 func (cl *SrvClient) Init(conn *net.TCPConn) {
 	cl.Conn = conn
-	cl.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	go cl.Read()
+	cl.Connected = true
+	WriteToLogFile("Server",fmt.Sprintf("Client:%v connected\n",conn.RemoteAddr()))
+	cl.Conn.SetReadDeadline(time.Now().Add(time.Duration(envConfig.Configs.Server.Timeout) * time.Second))
+	cl.Read()
 }
 
 func (cl *SrvClient) Close() {
-	cl.Conn.Close()
-	cl.Conn = nil
-	cl = nil
-	return
+	cl.mu.Lock()
+	cl.Conn.Close()	
+	cl.Connected = false
+	cl.mu.Unlock()
+	runtime.GC()
+	WriteToLogFile("Server",fmt.Sprintf("Client:%v closed.connection:%v\n",cl.Conn.RemoteAddr(),cl.Connected))
 }
 
 func (cl *SrvClient) Write(data []byte) {
-	fmt.Println("write:",string(data))
-	_,err := cl.Conn.Write(data)
+	
+	n,err := cl.Conn.Write(data)
+	WriteToLogFile("Server",fmt.Sprintf("write[%v][%d]:%v\n",cl.Conn.RemoteAddr(),n,string(data)))
 	if err != nil {
-		fmt.Printf("[%v][Write Error]:%v [useGoroutine]:%v\n",time.Now().Unix(),err,runtime.NumGoroutine())	
+		WriteToLogFile("Server",fmt.Sprintf("[%v][Write Error]:%v [useGoroutine]:%v\n",time.Now().Format("2006-01-02-15-04-05"),err,runtime.NumGoroutine()))	
 		cl.Close()
 	}
 }
 
 func (cl *SrvClient) Read() {
 	buf := make([]byte,2048)
-	for {
+	for cl.Connected {
 		bytesRead, err := cl.Conn.Read(buf)
-	    if err != nil && err != io.EOF {
-	     	fmt.Printf("[%v][Read Error]:%v [useGoroutine]:%v\n",time.Now().Unix(),err,runtime.NumGoroutine())	
+	    if err != nil {
+	     	WriteToLogFile("Server",fmt.Sprintf("[%v][Read Error]:%v [useGoroutine]:%v\n",time.Now().Format("2006-01-02-15-04-05"),err,runtime.NumGoroutine()))	
 	     	cl.Close()
-	     	return
+	     	break
 	    } else {
-	    	cl.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	    	cl.Conn.SetReadDeadline(time.Now().Add(time.Duration(envConfig.Configs.Server.Timeout) * time.Second))
 	    	data := buf[:bytesRead]
 	    	if len(data) > 0 { 
 	    		cl.Process(data)
@@ -73,7 +81,7 @@ func (cl *SrvClient) Read() {
 
 func (cl *SrvClient) Process(data []byte) {
 	if !cl.File {
-			fmt.Printf("[%v][process]:%v [useGoroutine]:%v\n",time.Now().Unix(),string(data),runtime.NumGoroutine())	
+			fmt.Printf("[%v][process]:%v [useGoroutine]:%v\n",time.Now().Format("2006-01-02-15-04-05"),string(data),runtime.NumGoroutine())	
 			revMsg := strings.Split(string(data),`,`)
 			rev := make(map[string]string)
 			for _,v := range revMsg {
@@ -140,6 +148,7 @@ func (cl *SrvClient) Process(data []byte) {
 								msg := fmt.Sprintf("action=file&type=send&msg=%v&fileName=%v&size=%v&cmdIdx=%s","start send",rev["file"],len(file),rev["cmdIdx"])
 								cl.Write([]byte(msg))
 								time.Sleep(1000 * time.Millisecond)
+								file = append(file,0x1a)
 								cl.Write(file)
 							} else {				
 								msg := fmt.Sprintf("action=file&type=error&msg=%v&cmdIdx=%s","[Error]: File is nil or file size is zero",rev["cmdIdx"])								
@@ -153,15 +162,39 @@ func (cl *SrvClient) Process(data []byte) {
 							gi := goInfo.GetInfo()
 							msg := fmt.Sprintf("action=server&ip=%v&type=env&msg=%v&cmdIdx=%s",serverIP,gi.String(),rev["cmdIdx"])
 							cl.Write([]byte(msg))
-						}				
+						}	
+					case "gorountine":
+						if cl.Login {	
+							msg := fmt.Sprintf("action=server&ip=%v&type=gorountine&msg=%v&cmdIdx=%s",serverIP,strconv.Itoa(runtime.NumGoroutine()),rev["cmdIdx"])
+							cl.Write([]byte(msg))
+						}	
+					case "gc":
+						if cl.Login {
+							for k,_ := range srvClientList {								
+								srvClientList[k].Close()
+							} 	
+						}	
+							
 				}
 			}
 		
 	} else{
-		cl.FileObj.Data = append(cl.FileObj.Data,data...)		
-		if int64(len(cl.FileObj.Data)) >= cl.FileObj.FileSize {
+		var databytes []byte
+		end := false
+		for k,v := range data {
+			if v == 0x1a {
+				end = true
+				databytes = append(databytes,data[:k-1]...)
+			}
+		}
+		if !end {
+			databytes = append(databytes,data...)
+		}
+		//fmt.Printf("server:% x \nend:%v\n",databytes,end)
+		cl.FileObj.Data = append(cl.FileObj.Data,databytes...)		
+		if end {
 			fileName := cl.FileObj.FileName
-			//fmt.Printf("Server write file:%v\n",fileName)
+			WriteToLogFile("Server",fmt.Sprintf("Server write file:%v\n",fileName))
 			os.Mkdir("file",0777)
 			dir := "file/"
 			if ServerInfo.OS == "windows" {
@@ -183,14 +216,7 @@ func (cl *SrvClient) Process(data []byte) {
 		            fmt.Printf("File close error:%v\n",err)
 		        }
 		    }()
-			/*fileZip := bytes.Buffer()
-			fileZip.Write(cl.FileObj.Data)
-			fmt.Println(len(fileZip.Bytes()))
-			r, err := gzip.NewReader(&fileZip)
-			r.Close()
-			fileData := make([]byte,len(fileZip.Bytes()))
-			r.Read(fileData)
-			fmt.Println("file:",len(fileData))*/
+
 	        if _, err := fo.Write(cl.FileObj.Data); err != nil {
 	           fmt.Printf("File Write Error:%v\n",err)
 	        }
@@ -207,15 +233,26 @@ func (cl *SrvClient) Process(data []byte) {
 
 func (cl *SrvClient) runCmd(rev map[string]string) string {
 	fmt.Printf("runCmd:%v\n",rev)
-	cmdLine := strings.Split(rev["cmd"]," ")
+	var cmdLine []string
 	var cmd *exec.Cmd
+	sh := false
+	if strings.Index(rev["cmd"],"|") != -1 {
+		sh = true
+	} else {
+		cmdLine = strings.Split(rev["cmd"]," ")
+	}
+	
 	if len(cmdLine) > 1{
 		arg := strings.Index(rev["cmd"]," ")+1	
 		cmdStr := rev["cmd"]	
 		args := strings.Split(cmdStr[arg:]," ")
 		cmd = exec.Command(cmdLine[0],args...)
 	} else {
-		cmd = exec.Command(cmdLine[0])
+		if sh {
+			cmd = exec.Command("sh","-c",rev["cmd"])
+		} else {
+			cmd = exec.Command(cmdLine[0])
+		}
 	}
 	//cmd.Stdin = strings.NewReader("cmdinput")
 	var out bytes.Buffer
@@ -233,7 +270,7 @@ func (cl *SrvClient) runCmd(rev map[string]string) string {
 }
 
 func (cl *SrvClient) CheckUser() bool {
-	if cl.User == envConfig.Configs.User && cl.Token == envConfig.Configs.Password {
+	if cl.User == envConfig.Configs.Auth.User && cl.Token == envConfig.Configs.Auth.Password {
 		return true	
 	}
 	return false
@@ -254,7 +291,7 @@ func Listen(port string) {
 	    }
     }
 	fmt.Printf("[Server] %v%v start listen.\n",serverIP,port)
-	l, err := net.Listen("tcp", port)
+	l, err := net.Listen("tcp4", port)
 	if err != nil {
 		fmt.Printf("Listen Error:%v\n",err)
 		return
@@ -264,13 +301,17 @@ func Listen(port string) {
 	for {
     	conn, err := ln.AcceptTCP()
     	if err != nil {
-    		log.Fatal(err)
+    		fmt.Println(err)
+    	} else {
+    		go ProcessConn(conn)
     	}
-    	go ProcessConn(conn)
 	}
 }
 
 func ProcessConn(c *net.TCPConn) {
 	client := new(SrvClient)
+	client.mu = &sync.Mutex{}
+	srvClientList = append(srvClientList,client)
 	client.Init(c)
+	
 }

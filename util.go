@@ -5,24 +5,44 @@ import (
 	"os"
 	"fmt"
 	"time"
+	"syscall"
 )
 
+func SetUlimit(number uint64) {
+	var rLimit syscall.Rlimit
+    err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
+    if err != nil {
+        fmt.Println("[Error]: Getting Rlimit ", err)
+    }    
+    rLimit.Max = number
+    rLimit.Cur = number
+    err = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rLimit)
+    if err != nil {
+        fmt.Println("[Error]: Setting Rlimit ", err)
+    }
+    err = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
+    if err != nil {
+        fmt.Println("[Error]: Getting Rlimit ", err)
+    }
+}
 
 func WriteToLogFile(remote string, msg string) {
-	logMsg := "[" + remote + "]:" + msg
-	log.Println(logMsg)
-	t := time.Now()
-	fileName := t.Format("20060102") + ".log"
-	fmt.Println(logMsg, fileName)
-	f, err := os.OpenFile(fileName, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0777)
-
-	if err != nil {
-		log.Fatalf("error opening file: %v", err)
+	if *configInfo.Debug{
+		logMsg := fmt.Sprintf("[%v][%v]:%s",time.Now().Unix(),remote,msg)
+		log.Println(logMsg)
+		t := time.Now()
+		fileName := t.Format("20060102") + ".log"
+		fmt.Println(logMsg)
+		f, err := os.OpenFile(fileName, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0777)
+	
+		if err != nil {
+			log.Fatalf("error opening file: %v", err)
+		}
+	
+		defer f.Close()
+		log.SetOutput(f)
+		log.Println(logMsg)
 	}
-
-	defer f.Close()
-	log.SetOutput(f)
-	log.Println(logMsg)
 }
 
 func SaveFile(dir string,fileName string,data []byte) bool {

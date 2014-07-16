@@ -32,33 +32,35 @@ func (cl *Client) Init(conn *net.TCPConn) {
 func (cl *Client) Write(data []byte) {
 	if cl.Conn != nil {	
 		//fmt.Printf("[%v][write]:%v\n",cl.Server,string(data))
-		if string(data) != "health" {
-			cl.Processing = true
-		}
+		
+		cl.Processing = true
+		//WriteToLogFile("Write",string(data))	
 		_,err := cl.Conn.Write(data)		
 		if err != nil {
-			fmt.Printf("Client write error:%v\n",err)
+			fmt.Printf("[Client][Error]:Write error%v\n",err)
 			cl.Close()
 			cl.ClientChan <- "write failed"
 		}
 	} 
 }
 
-func (cl *Client) Read() {
-	buf := make([]byte,2048)
+func (cl *Client) Read() {	
+    buf := make([]byte,10240)
 	for {
 		n, err := cl.Conn.Read(buf)
 	    if err != nil {
-	     	fmt.Printf("Client read error:%v\n",err)
+	     	fmt.Printf("[Client][Error]:Read error %v,client exit.\n",err)
 	     	cl.Close()
 	     	return
 	    } else {	    	
 	    	cl.Process(buf[:n])
 	    }
     }
+    WriteToLogFile("ReadError","Connection break.")	
 }
 
 func (cl *Client) Process(data []byte) {	
+	//WriteToLogFile("Read",string(data))
 	if !cl.File {
 		cl.Receive = append(cl.Receive,data...)		
 		revMsg := strings.Split(string(cl.Receive),`&`)		
@@ -84,24 +86,28 @@ func (cl *Client) Process(data []byte) {
 		if _,idxOk := rev["cmdIdx"]; idxOk {
 			cl.Msg = string(cl.Receive)[strings.Index(string(cl.Receive),`&msg=`)+5:strings.Index(string(cl.Receive),`&cmdIdx`)]
 			cl.Receive = []byte{}
-		} else {
-			return
-		}
-		fmt.Printf("[%v]\n",cl.Server)	
-		fmt.Printf("      [type]:%v\n",rev["type"])
-		fmt.Printf("      [cmdIdx]:%v\n",rev["cmdIdx"])
-		strCount := strings.Count(cl.Msg,"\n")
-		if strCount > 1 {
-			cl.Msg = strings.Replace(cl.Msg,"\n","\n        ",strCount -1)
-			fmt.Printf("      [msg]:\n        %v",cl.Msg)
-		} else if strCount == 1{
-			fmt.Printf("      [msg]:%v",cl.Msg)
-		} else {
-			fmt.Printf("      [msg]:%v\n",cl.Msg)
+			if *configInfo.Load == "" {
+				fmt.Printf("[%v]\n",cl.Server)	
+				fmt.Printf("      [type]:%v\n",rev["type"])
+				fmt.Printf("      [cmdIdx]:%v\n",rev["cmdIdx"])
+				strCount := strings.Count(cl.Msg,"\n")
+				if strCount > 1 {
+					cl.Msg = strings.Replace(cl.Msg,"\n","\n        ",strCount -1)
+					fmt.Printf("      [msg]:\n        %v",cl.Msg)
+				} else if strCount == 1{
+					fmt.Printf("      [msg]:%v",cl.Msg)
+				} else {
+					fmt.Printf("      [msg]:%v\n",cl.Msg)
+				}
+			} else {
+				str := strings.Replace(cl.Msg,"\n","\r",-1)
+				fmt.Printf("[script]client:%v,type:%v,cmdIdx:%v,msg:%v\n",cl.Server,rev["type"],rev["cmdIdx"],str)
+			}
+			
 		}
 		cl.Processing = false	
 		cl.ClientChan <- string(data)
-	} else {
+	} else {		
 		if cl.FileObj.FileSize == 0 {
 			revMsg := strings.Split(string(data),`&`)		
 			rev := make(map[string]string)
@@ -121,10 +127,16 @@ func (cl *Client) Process(data []byte) {
 							}
 							cl.FileObj.FileSize = fileSize
 						} else {
-							fmt.Printf("[%v]\n",cl.Server)	
-							fmt.Printf("      [type]:%v\n",rev["type"])
-							fmt.Printf("      [cmdIdx]:%v\n",rev["cmdIdx"])
-							fmt.Printf("      [msg]:%v\n",rev["msg"])
+							
+							if *configInfo.Load == "" {
+								fmt.Printf("[%v]\n",cl.Server)	
+								fmt.Printf("      [type]:%v\n",rev["type"])
+								fmt.Printf("      [cmdIdx]:%v\n",rev["cmdIdx"])
+								fmt.Printf("      [msg]:%v\n",rev["msg"])
+							} else {
+								str := strings.Replace(cl.Msg,"\n","\r",-1)
+								fmt.Printf("[script]client:%v,type:%v,cmdIdx:%v,msg:%v\n",cl.Server,rev["type"],rev["cmdIdx"],str)
+							}
 							cl.File = false
 							cl.Processing = false
 							msg := fmt.Sprintf("action=server&ip=%v&type=get&msg=%v&cmdIdx=%s",cl.Server,fmt.Sprintf("Server get file %v failed",cl.FileObj.FileName),cl.FileObj.CmdIdx)
@@ -135,8 +147,21 @@ func (cl *Client) Process(data []byte) {
 				}
 			}
 		} else {
-			cl.FileObj.Data = append(cl.FileObj.Data,data...)		
-			if int64(len(cl.FileObj.Data)) >= cl.FileObj.FileSize {
+			var databytes []byte
+			end := false
+			for k,v := range data {
+				if v == 0x1a {
+					end = true
+					databytes = append(databytes,data[:k-1]...)
+				}
+			}
+			if !end {
+				databytes = append(databytes,data...)
+			}
+			//fmt.Printf("server:% x \nend:%v\n",databytes,end)
+			cl.FileObj.Data = append(cl.FileObj.Data,databytes...)		
+			if end {		
+			//if int64(len(cl.FileObj.Data)) >= cl.FileObj.FileSize {
 				fileName := fmt.Sprintf("F%s-%s",cl.Server,cl.FileObj.FileName)
 				fmt.Printf("Server write file:%v\n",fileName)
 				os.Mkdir("file",0777)
@@ -225,6 +250,7 @@ func (cl *Client) Close() {
 func (cl *Client) checkConneciton(_close bool,_connected bool) {
 	cl.IsClose = _close
 	cl.Connected = _connected
+	//WriteToLogFile("checkConneciton",fmt.Sprintf("Close:%v Connected:%v",_close,_connected))	
 }
 
 func (cl *Client) Connect(addr string) {
@@ -238,18 +264,25 @@ func (cl *Client) Connect(addr string) {
 	}	
 	con, err := net.DialTCP("tcp", nil, serverAddr)
 	if err != nil {	
-		fmt.Printf("----------------Client[%v]-------------\n",cl.Server)	
-		fmt.Printf("[type]:%v\n","Error")
-		fmt.Printf("[msg]:%v\n",err)
-		fmt.Printf("----------------------------------------------\n")
+		if *configInfo.Load == "" {
+			fmt.Printf("----------------Client[%v]-------------\n",cl.Server)	
+			fmt.Printf("[type]:%v\n","Error")
+			fmt.Printf("[msg]:%v\n",err)
+			fmt.Printf("----------------------------------------------\n")
+		} else {
+			fmt.Printf("[script]client:%v,type:%v,msg:%v\n",cl.Server,"Error",err)
+		}
 		cl.checkConneciton(true, false)	
 		cl.ClientChan <- "connect failed"
 		return
 	}
    	
 	cl.checkConneciton(false, true)
+	time.Sleep(time.Second)
 	cl.Init(con)
+	cl.File = false
 	msg := fmt.Sprintf("action:login,user:%s,pwd:%s",cl.User,cl.Pwd)
+	//cl.Conn.SetReadDeadline(time.Now().Add(time.Duration(envConfig.Configs.Server.Timeout) * time.Second))
 	go cl.Read()
 	cl.Write([]byte(msg))	
 }
