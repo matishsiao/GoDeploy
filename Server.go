@@ -104,9 +104,22 @@ func (cl *SrvClient) Process(data []byte) {
 						 }
 					case "cmd":
 						if cl.Login {
-							outStr := cl.runCmd(rev)							
+							outStr := cl.runCmd(rev,false)							
 							for strings.Index(outStr ,"broken pipe") != -1 {
-								outStr = cl.runCmd(rev)
+								outStr = cl.runCmd(rev,false)
+								time.Sleep(250 * time.Millisecond)
+							}						
+							if outStr == "" {
+								outStr = rev["cmd"] +" success"
+							}							
+							msg := fmt.Sprintf("action=server&ip=%v&type=cmd&msg=%v&cmdIdx=%s",serverIP,outStr,rev["cmdIdx"])
+							cl.Write([]byte(msg))							
+						}
+					case "sh":
+						if cl.Login {
+							outStr := cl.runCmd(rev,true)							
+							for strings.Index(outStr ,"broken pipe") != -1 {
+								outStr = cl.runCmd(rev,true)
 								time.Sleep(250 * time.Millisecond)
 							}						
 							if outStr == "" {
@@ -181,14 +194,30 @@ func (cl *SrvClient) Process(data []byte) {
 	} else{
 		var databytes []byte
 		end := false
-		for k,v := range data {
+		/*for k,v := range data {
 			if v == 0x1a {
 				end = true
 				databytes = append(databytes,data[:k-1]...)
 			}
-		}
+		}*/
 		if !end {
-			databytes = append(databytes,data...)
+			all := int64(len(cl.FileObj.Data) + len(data))
+			need := cl.FileObj.FileSize - all 
+			if *configInfo.Debug {
+				fmt.Printf("need pkt:%v now pkt:%v filesize:%v\n",need,all,cl.FileObj.FileSize)
+			}	 
+			if all > cl.FileObj.FileSize {
+				
+				if int64(len(data)) >= need {
+					databytes = append(databytes,data[:need]...)
+				} 
+				end = true
+			} else {
+				databytes = append(databytes,data...)
+				if need == 0 {
+					end = true
+				}	
+			}
 		}
 		//fmt.Printf("server:% x \nend:%v\n",databytes,end)
 		cl.FileObj.Data = append(cl.FileObj.Data,databytes...)		
@@ -231,15 +260,20 @@ func (cl *SrvClient) Process(data []byte) {
 }
 
 
-func (cl *SrvClient) runCmd(rev map[string]string) string {
+func (cl *SrvClient) runCmd(rev map[string]string,shMode bool) string {
 	fmt.Printf("runCmd:%v\n",rev)
 	var cmdLine []string
 	var cmd *exec.Cmd
+	
 	sh := false
-	if strings.Index(rev["cmd"],"|") != -1 {
+	if !shMode {
+		if strings.Index(rev["cmd"],"|") != -1 {
+			sh = true
+		} else {
+			cmdLine = strings.Split(rev["cmd"]," ")
+		}
+	}else{
 		sh = true
-	} else {
-		cmdLine = strings.Split(rev["cmd"]," ")
 	}
 	
 	if len(cmdLine) > 1{
@@ -294,6 +328,7 @@ func Listen(port string) {
 	l, err := net.Listen("tcp4", port)
 	if err != nil {
 		fmt.Printf("Listen Error:%v\n",err)
+		os.Exit(1)
 		return
 	}
 	ln := l.(*net.TCPListener)

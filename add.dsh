@@ -1,5 +1,0 @@
-cmd ls
-cmd mkdir test
-cmd chmod 777 test
-file test.txt
-cmd mv test.txt test/

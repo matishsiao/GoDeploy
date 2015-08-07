@@ -15,11 +15,11 @@ import (
 	"github.com/matishsiao/goInfo"
 	"sync"
 	_ "compress/gzip"
-	_ "bytes"
+	"path"
 )
 const layout = "2006-01-02-15-04-05"
 
-var version string = "0.0.11"
+var version string = "0.0.15"
 var configInfo ConfigInfo
 var help *bool
 var envConfig Configs
@@ -28,7 +28,7 @@ var clientChan chan string
 var processChan chan bool
 var cmdIdx int
 var cmdScripts []string
-var cmdReg = regexp.MustCompile("^cmd+|^help+|^exit+|^file+|^script+|^get+|^gorountine+|^env+|^status+|^gc+")
+var cmdReg = regexp.MustCompile("^sh+|^cmd+|^help+|^exit+|^file+|^script+|^get+|^gorountine+|^env+|^status+|^gc+|^delaycmd+")
 var cLock CommandLock
 var countSec int
 
@@ -92,8 +92,9 @@ func Init() {
 }
 
 
-func main() {
-	configInfo.FileName = flag.String("config", "./config.json", "set config file path.")
+func main() {	
+	exePath := path.Dir(strings.Replace(os.Args[0], "\\", "/", -1))
+	configInfo.FileName = flag.String("config", exePath+"/config.json", "set config file path.")
 	configInfo.Debug = flag.Bool("debug", false, "show debug trace message.")
 	configInfo.Version = flag.Bool("version", false, "GoDeploy version.")
 	configInfo.Mode = flag.String("mode", "client", "service mode:server,client default:client")
@@ -275,7 +276,7 @@ func sendCmd(cmdStr string) bool {
 	if *configInfo.Record && cmdStr != "quit" && cmdStr != "exit" {		
 		cmdScripts = append(cmdScripts,cmdStr)
 	} 
-	WriteToLogFile("Script",cmdStr)
+	WriteToLogFile("Cmd",cmdStr)
 	switch cmd {
 			case "help":
 				fmt.Printf("[Deploy help]\n")
@@ -296,6 +297,9 @@ func sendCmd(cmdStr string) bool {
 				fmt.Printf("script	 	Use script to run commands.\n")				
 				fmt.Printf("    		Example:\n")
 				fmt.Printf("    			script autoMake.ds\n")				
+				fmt.Printf("sh		Send sh command to server\n")
+				fmt.Printf("    		Example:\n")
+				fmt.Printf("    			sh ps aux|grep Go\n")				
 				fmt.Printf("status		Show all server status.\n")
 				fmt.Printf("version		Show version.\n")				
 				cmdEndPos()
@@ -334,7 +338,7 @@ func sendCmd(cmdStr string) bool {
 					}
 										
 				}
-				file = append(file,0x1a)								
+				//file = append(file,0x1a)								
 				if file != nil && len(file) > 0 {
 					for _,v := range clientList {
 						if v != nil && v.Connected && v.Login {
@@ -364,7 +368,15 @@ func sendCmd(cmdStr string) bool {
 							v.InputCmd(cmdStr,cmdIdx)
 						}
 					}
-				}			
+				}	
+			case "sh":
+				if strings.Index(cmdStr,"sh ") != -1 && cmdReg.MatchString(cmdStr) {					
+					for _,v := range clientList {
+						if v != nil && v.Connected && v.Login {
+							v.InputCmd(cmdStr,cmdIdx)
+						}
+					}
+				}		
 			case "get":
 				if strings.Index(cmdStr,"get ") != -1 && cmdReg.MatchString(cmdStr) {	
 					FileName := cmdStr[strings.Index(cmdStr," ")+1:]			
@@ -373,7 +385,34 @@ func sendCmd(cmdStr string) bool {
 							v.GetFile(FileName,cmdIdx)
 						}
 					}
-				}				
+				}		
+			case "delaycmd":
+				if strings.Index(cmdStr,"delaycmd ") != -1 && cmdReg.MatchString(cmdStr) {
+					delaycmd := strings.Replace(cmdStr, "delaycmd ", "", 1)
+					if strings.Index(delaycmd," ") != -1 && strings.Index(delaycmd," ") <= 2{	
+						delayTimeStr := delaycmd[:strings.Index(delaycmd," ")]
+						
+						delayTime,err := strconv.Atoi(delayTimeStr)
+						if err != nil {
+							delayTime = 1
+						}		
+						runcmd := delaycmd[strings.Index(delaycmd," ")+1:]						
+						if *configInfo.Debug{
+							fmt.Println("delaycmd:",delayTime,runcmd)
+						}							
+						for _,v := range clientList {
+							if v != nil && v.Connected && v.Login {
+								v.InputCmd(runcmd,cmdIdx)
+							}
+							if *configInfo.Debug{
+								fmt.Printf("run delaycmd:%s,cmdIdx:%d\n",runcmd,cmdIdx)
+							}
+							time.Sleep(time.Duration(delayTime) * time.Second)
+						}
+					}
+				}else{
+					fmt.Println("delaycmd:not match:",cmdStr)
+				}	
 			default:			
 			fmt.Printf("[Error]: Wrong command input. You can use help to see more.\n")		
 			cmdEndPos()				

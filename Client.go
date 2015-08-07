@@ -100,8 +100,10 @@ func (cl *Client) Process(data []byte) {
 					fmt.Printf("      [msg]:%v\n",cl.Msg)
 				}
 			} else {
-				str := strings.Replace(cl.Msg,"\n","\r",-1)
-				fmt.Printf("[script]client:%v,type:%v,cmdIdx:%v,msg:%v\n",cl.Server,rev["type"],rev["cmdIdx"],str)
+				//str := strings.Replace(cl.Msg,"\n","\r",-1)
+				//fmt.Printf("[script]client:%v,type:%v,cmdIdx:%v,msg:%v\n",cl.Server,rev["type"],rev["cmdIdx"],str)
+				fmt.Printf("[script]client:%v,type:%v,cmdIdx:%v,msg:%v\n",cl.Server,rev["type"],rev["cmdIdx"],cl.Msg)
+				
 			}
 			
 		}
