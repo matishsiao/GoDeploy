@@ -1,7 +1,7 @@
 # Introduction:
   GoDeploy is simple deploy tool by Golang.
   
-  It can help you to quickly send commands or file to your server groups.
+  It can help you to quickly send commands or file to your servers group.
   
   one client with mutli servers.
   
